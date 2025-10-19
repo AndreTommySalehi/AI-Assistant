@@ -10,18 +10,12 @@ A voice-enabled AI assistant inspired by Marvel's Jarvis, powered by Ollama and 
 
 ## Installation
 
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/AI-Assistant.git
-cd AI-Assistant
-```
-
-2. Install Python dependencies:
+1. Install Python dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Ensure Ollama is running:
+2. Ensure Ollama is running:
 ```bash
 ollama list
 ```

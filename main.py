@@ -3,7 +3,7 @@ Jarvis AI Assistant - Main entry point
 """
 
 import subprocess
-from jarvis.assistant import JarvisAssistant
+from src.assistant import JarvisAssistant
 
 
 def verify_ollama():

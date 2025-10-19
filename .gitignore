@@ -1,0 +1,37 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Model files (optional - if they're large)
+vosk-model-*/
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/

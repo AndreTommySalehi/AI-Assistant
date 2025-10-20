@@ -22,7 +22,7 @@ def verify_ollama():
         subprocess.run(["ollama", "list"], capture_output=True, check=True)
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Ollama not found. Install from https://ollama.ai")
+        print("❌ Ollama not found. Install from https://ollama.ai")
         return False
 
 
@@ -44,9 +44,8 @@ Available Commands:
 def main():
     print("""
     ╔═══════════════════════════════════════╗
-    ║   JARVIS AI - Modular Edition         ║
-    ║   Created by Andre S                  ║
-    ║   Version 2.0 - Future-Proof          ║
+    ║              JARVIS AI                ║
+    ║           Created by Andre S          ║
     ╚═══════════════════════════════════════╝
     """)
     
@@ -66,7 +65,7 @@ def main():
         print(f"   Total facts: {stats['total_facts']}")
         print(f"   Storage: {stats['storage_backend']}")
         print(f"   Learning engines: {len(stats['learning_engines'])}")
-        print(f"   Semantic search: {'✓' if stats['semantic_search'] else '✗ (install: pip install sentence-transformers)'}")
+        print(f"   Semantic search: {'enabled' if stats['semantic_search'] else 'disabled (install: pip install sentence-transformers)'}")
         
     except Exception as e:
         print(f"\nFailed to initialize: {e}")
@@ -75,9 +74,9 @@ def main():
         return
     
     print("\nTips:")
-    print("  - Just chat naturally! Jarvis learns automatically 🧠")
+    print("  - Just chat naturally - Jarvis learns automatically")
     print("  - Type 'help' to see all commands")
-    print("  - Watch for 🧠 icon when Jarvis learns something")
+    print("  - Watch for [*] when Jarvis learns something new")
     print("  - Your conversations are auto-exported for future fine-tuning")
     print("\n" + "-" * 60)
     
@@ -121,6 +120,21 @@ def main():
                 
                 continue
             
+            # Personality command (NEW)
+            if user_input.lower() == 'personality':
+                personality = assistant.personality.get_personality_summary()
+                print(f"\nPersonality Status:")
+                print(f"   Development: {personality['development_stage']}")
+                print(f"   Total interactions: {personality['interactions']}")
+                print(f"\nCurrent Traits:")
+                for trait, value in personality['traits'].items():
+                    bar = '█' * (value // 5) + '░' * (20 - value // 5)
+                    print(f"   {trait.capitalize():12} [{bar}] {value}/100")
+                print(f"\nDominant Traits:")
+                for trait in personality['dominant_traits']:
+                    print(f"   - {trait}")
+                continue
+            
             # Show facts command (NEW - for debugging)
             if user_input.lower() == 'show facts':
                 facts = assistant.memory.storage.get_all_facts()
@@ -136,7 +150,7 @@ def main():
             if user_input.lower() == 'export':
                 try:
                     filepath = assistant.export_for_finetuning()
-                    print(f"\n✓ Training data exported to: {filepath}")
+                    print(f"\nTraining data exported to: {filepath}")
                     print("  Ready for fine-tuning when you need it!")
                 except Exception as e:
                     print(f"\nExport failed: {e}")
@@ -159,9 +173,9 @@ def main():
                 if fact:
                     success = assistant.memory.remember_fact_manually(fact, "user_specified")
                     if success:
-                        print(f"✓ Remembered: {fact}")
+                        print(f"[*] Remembered: {fact}")
                     else:
-                        print(f"ℹ️ Already knew that!")
+                        print(f"Already knew that!")
                 else:
                     print("Usage: remember [something to remember]")
                 continue
@@ -169,7 +183,7 @@ def main():
             # Clear conversation command
             if user_input.lower() == 'clear':
                 assistant.conversation_history = []
-                print("✓ Conversation history cleared (memories preserved)")
+                print("Conversation history cleared (memories preserved)")
                 continue
             
             # Normal chat

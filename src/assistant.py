@@ -8,6 +8,7 @@ import re
 from .llm import LLMHandler
 from .search import WebSearch
 from .modular_memory import ModularMemorySystem
+from .personality import PersonalityEngine, PersonalityResponse
 
 
 class JarvisAssistant:
@@ -70,17 +71,20 @@ class JarvisAssistant:
             
             # Auto-learn from this conversation
             if self.auto_learn and (self.message_count % self.learn_frequency == 0):
+                if self.debug:
+                    print(f"\n[DEBUG] Attempting to learn from: '{user_input[:50]}...'")
+                
                 learned_count = self.memory.learn_from_conversation(
                     user_input, 
                     response
                 )
                 
+                if self.debug:
+                    print(f"[DEBUG] Learned {learned_count} facts")
+                
                 if learned_count > 0:
-                    # Visual feedback
-                    if learned_count == 1:
-                        print("🧠 ", end="", flush=True)
-                    else:
-                        print(f"🧠×{learned_count} ", end="", flush=True)
+                    # Visual feedback - just a simple indicator
+                    print("[*] ", end="", flush=True)
             
             # Trim history if too long
             if len(self.conversation_history) > self.max_history * 2:
@@ -178,32 +182,32 @@ Instructions: Answer the user's question using the search results above. Be conv
     
     def shutdown(self):
         """Save everything before exiting"""
-        print("\n💾 Saving memories...")
+        print("\nSaving memories...")
         
         # Export training data automatically
         try:
             export_path = self.export_for_finetuning()
-            print(f"✓ Training data exported: {export_path}")
+            print(f"Training data exported: {export_path}")
         except Exception as e:
-            print(f"⚠️ Export failed: {e}")
+            print(f"Export failed: {e}")
         
         # Show stats
         stats = self.get_memory_stats()
-        print(f"\n📊 Session Summary:")
+        print(f"\nSession Summary:")
         print(f"   Total facts remembered: {stats['total_facts']}")
         print(f"   Learned this session: {stats['learned_this_session']}")
         
         if stats['by_category']:
-            print(f"\n📚 By Category:")
+            print(f"\nBy Category:")
             for cat, count in stats['by_category'].items():
                 print(f"   {cat}: {count}")
         
         if stats['by_learning_engine']:
-            print(f"\n🤖 By Learning Method:")
+            print(f"\nBy Learning Method:")
             for engine, count in stats['by_learning_engine'].items():
                 print(f"   {engine}: {count}")
         
-        print("\n👋 Goodbye!")
+        print("\nGoodbye!")
 
 
 # ============================================================================

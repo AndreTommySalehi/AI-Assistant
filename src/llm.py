@@ -1,20 +1,12 @@
 """
-Enhanced LLM with GPT-OSS (HuggingFace), Ollama, and A/B testing
+Enhanced LLM with GPT-OSS server, Ollama, and A/B testing
 """
 
 import ollama
 from . import config
 import re
 from datetime import datetime
-
-# Try to import HuggingFace Transformers for GPT-OSS
-try:
-    from transformers import pipeline
-    import torch
-    HF_AVAILABLE = True
-except ImportError:
-    HF_AVAILABLE = False
-
+import requests
 
 class LLMHandler:
     """Handles communication with multiple LLM providers"""
@@ -24,22 +16,18 @@ class LLMHandler:
         self.use_ab_testing = config.ENABLE_AB_TESTING
         self.use_gpt_oss = config.USE_GPT_OSS
         
-        # Initialize GPT-OSS pipeline if enabled
-        self.gpt_oss_pipe = None
-        if self.use_gpt_oss and HF_AVAILABLE:
+        # Check if GPT-OSS server is running
+        self.gpt_oss_available = False
+        if self.use_gpt_oss:
             try:
-                print(f"Loading GPT-OSS model: {config.GPT_OSS_MODEL}...")
-                print("⏳ This may take a few minutes on first run (downloading ~8GB)...")
-                
-                self.gpt_oss_pipe = pipeline(
-                    "text-generation",
-                    model=config.GPT_OSS_MODEL,
-                    torch_dtype=torch.bfloat16,
-                    device_map="auto",
-                )
-                print(f"✓ GPT-OSS model loaded successfully!")
+                response = requests.get("http://localhost:8000/health", timeout=2)
+                if response.status_code == 200:
+                    self.gpt_oss_available = True
+                    print("✓ GPT-OSS server connected!")
+                else:
+                    print("✗ GPT-OSS server not responding")
             except Exception as e:
-                print(f"✗ Failed to load GPT-OSS: {e}")
+                print(f"✗ GPT-OSS server not running (start with: transformers serve --model openai/gpt-oss-20b)")
                 self.use_gpt_oss = False
         
         self._verify_ollama_model()
@@ -54,34 +42,52 @@ class LLMHandler:
             else:
                 models_list = models_response
             
-            model_names = []
-            for model in models_list:
-                if isinstance(model, dict):
-                    model_names.append(model.get('name', model.get('model', '')))
-                else:
-                    model_names.append(getattr(model, 'name', getattr(model, 'model', '')))
-            
             print(f"✓ Using Ollama model: {self.primary_model}")
             
         except Exception as e:
             pass  # Silent failure
     
     def generate(self, prompt, use_search_context=False):
-        """Generate response - prioritize GPT-OSS if available"""
+        """Generate response - try GPT-OSS server first, fallback to Ollama"""
         
-        # If GPT-OSS is loaded, use it as primary
-        if self.use_gpt_oss and self.gpt_oss_pipe:
+        # Try GPT-OSS server if available
+        if self.use_gpt_oss and self.gpt_oss_available:
             try:
-                return self._generate_gpt_oss(prompt, use_search_context)
+                return self._generate_gpt_oss_server(prompt, use_search_context)
             except Exception as e:
                 print(f"GPT-OSS failed, falling back to Ollama: {e}")
                 return self._single_generate(prompt, use_search_context)
         
-        # Otherwise use A/B testing or single model
+        # Otherwise use Ollama
         if self.use_ab_testing and use_search_context:
             return self._ab_test_generate(prompt, use_search_context)
         else:
             return self._single_generate(prompt, use_search_context)
+    
+    def _generate_gpt_oss_server(self, prompt, use_search_context):
+        """Generate using GPT-OSS server"""
+        system_content = self._get_system_prompt(use_search_context)
+        
+        # Call the transformers server API
+        response = requests.post(
+            "http://localhost:8000/v1/chat/completions",
+            json={
+                "model": "openai/gpt-oss-20b",
+                "messages": [
+                    {"role": "system", "content": system_content},
+                    {"role": "user", "content": prompt}
+                ],
+                "max_tokens": config.GPT_OSS_MAX_TOKENS,
+                "temperature": config.MODEL_OPTIONS.get('temperature', 0.7),
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data['choices'][0]['message']['content']
+        else:
+            raise Exception(f"Server returned {response.status_code}")
     
     def generate_with_history(self, prompt, conversation_history):
         """Generate response with conversation history"""
@@ -119,27 +125,6 @@ class LLMHandler:
             print(f"[LLM Error]: {str(e)}")
             return f"I'm having trouble connecting to my AI model right now. Please try again."
     
-    def _generate_gpt_oss(self, prompt, use_search_context):
-        """Generate using GPT-OSS as primary model"""
-        system_content = self._get_system_prompt(use_search_context)
-        full_prompt = f"{system_content}\n\nUser: {prompt}\n\nAssistant:"
-        
-        outputs = self.gpt_oss_pipe(
-            full_prompt,
-            max_new_tokens=config.GPT_OSS_MAX_TOKENS,
-            temperature=config.MODEL_OPTIONS.get('temperature', 0.7),
-            do_sample=True,
-            top_p=config.MODEL_OPTIONS.get('top_p', 0.9),
-        )
-        
-        gpt_oss_response = outputs[0]["generated_text"]
-        
-        # Extract only the assistant's response
-        if "Assistant:" in gpt_oss_response:
-            gpt_oss_response = gpt_oss_response.split("Assistant:")[-1].strip()
-        
-        return gpt_oss_response
-    
     def _single_generate(self, prompt, use_search_context):
         """Generate from primary model only"""
         try:
@@ -161,7 +146,7 @@ class LLMHandler:
             return f"I'm having trouble connecting to my AI model right now. Please try again."
     
     def _ab_test_generate(self, prompt, use_search_context):
-        """A/B test: compare Ollama + GPT-OSS responses"""
+        """A/B test: compare responses"""
         responses = []
         system_content = self._get_system_prompt(use_search_context)
         
@@ -178,51 +163,14 @@ class LLMHandler:
         except Exception as e:
             pass
         
-        # Model 2: Secondary Ollama (if configured)
-        if hasattr(config, 'SECONDARY_MODEL') and config.SECONDARY_MODEL:
+        # Model 2: GPT-OSS (if available)
+        if self.use_gpt_oss and self.gpt_oss_available:
             try:
-                secondary_response = ollama.chat(
-                    model=config.SECONDARY_MODEL,
-                    messages=[
-                        {'role': 'system', 'content': system_content},
-                        {'role': 'user', 'content': prompt}
-                    ],
-                    options=config.MODEL_OPTIONS
-                )['message']['content']
-                
-                confidence = self._calculate_confidence(secondary_response, prompt)
+                gpt_response = self._generate_gpt_oss_server(prompt, use_search_context)
+                confidence = self._calculate_confidence(gpt_response, prompt)
                 responses.append({
-                    'model': config.SECONDARY_MODEL,
-                    'response': secondary_response,
-                    'confidence': confidence,
-                    'provider': 'Ollama'
-                })
-            except Exception as e:
-                pass
-        
-        # Model 3: GPT-OSS (if enabled and loaded)
-        if self.use_gpt_oss and self.gpt_oss_pipe:
-            try:
-                # Format prompt for GPT-OSS
-                full_prompt = f"{system_content}\n\nUser: {prompt}\n\nAssistant:"
-                
-                outputs = self.gpt_oss_pipe(
-                    full_prompt,
-                    max_new_tokens=config.GPT_OSS_MAX_TOKENS,
-                    temperature=config.MODEL_OPTIONS.get('temperature', 0.7),
-                    do_sample=True,
-                    top_p=config.MODEL_OPTIONS.get('top_p', 0.9),
-                )
-                
-                gpt_oss_response = outputs[0]["generated_text"]
-                # Extract only the assistant's response
-                if "Assistant:" in gpt_oss_response:
-                    gpt_oss_response = gpt_oss_response.split("Assistant:")[-1].strip()
-                
-                confidence = self._calculate_confidence(gpt_oss_response, prompt)
-                responses.append({
-                    'model': config.GPT_OSS_MODEL,
-                    'response': gpt_oss_response,
+                    'model': 'GPT-OSS',
+                    'response': gpt_response,
                     'confidence': confidence,
                     'provider': 'GPT-OSS'
                 })
@@ -234,7 +182,6 @@ class LLMHandler:
             return "I'm having trouble generating a response. Please try again."
         
         best = max(responses, key=lambda x: x['confidence'])
-        
         return best['response']
     
     def _calculate_confidence(self, response, prompt):

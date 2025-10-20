@@ -1,24 +1,24 @@
 """
-Configuration with GPT-OSS (HuggingFace) support
+Configuration with Qwen 2.5 (Best free local model)
 """
 
-# GPT-OSS Configuration (HuggingFace) - PRIMARY MODEL
-USE_GPT_OSS = True  # Set to True to use GPT-OSS
-GPT_OSS_MODEL = "openai/gpt-oss-20b"  # Primary model - has 2024 training data!
-GPT_OSS_MAX_TOKENS = 512  # Max response length
-GPT_OSS_PRIORITY = True  # Make GPT-OSS the primary responder
+# GPT-OSS Configuration - DISABLED
+USE_GPT_OSS = False  # Too much hassle with servers
+GPT_OSS_MODEL = "openai/gpt-oss-20b"
+GPT_OSS_MAX_TOKENS = 512
+GPT_OSS_PRIORITY = False
 
-# Ollama Models - BACKUP ONLY
-DEFAULT_MODEL = "llama3.1:8b"  # Fallback Ollama model
-SECONDARY_MODEL = None  # Disable secondary to save resources
+# Ollama Models - Qwen 2.5 (has 2024 training data!)
+DEFAULT_MODEL = "qwen2.5:14b"  # Upgraded from llama3.1:8b
+SECONDARY_MODEL = None  # Not needed
 
-# A/B Testing
-ENABLE_AB_TESTING = True  # GPT-OSS vs Ollama
-CONFIDENCE_THRESHOLD = 30  # Lower threshold - let GPT-OSS win more often
+# A/B Testing - DISABLED (only using one model)
+ENABLE_AB_TESTING = False
+CONFIDENCE_THRESHOLD = 30
 
 # Search Configuration
 SEARCH_TIMEOUT = 30
-SEARCH_MAX_RESULTS = 7
+SEARCH_MAX_RESULTS = 5
 SEARCH_DELAY = 1
 
 # Credible source domains
@@ -30,7 +30,7 @@ CREDIBLE_DOMAINS = [
     'cdc.gov', 'nih.gov', 'who.int'
 ]
 
-# Search trigger keywords
+# Search trigger keywords - expanded
 SEARCH_KEYWORDS = [
     # Time-based
     'weather', 'news', 'today', 'now', 'current', 'latest',

@@ -2,7 +2,17 @@
 Jarvis AI Assistant - Main entry point
 """
 
-import subprocess     
+import warnings
+import sys
+import os
+
+# Suppress ALL warnings before any other imports
+warnings.filterwarnings("ignore")
+os.environ['PYTHONWARNINGS'] = 'ignore::RuntimeWarning'
+if not sys.warnoptions:
+    warnings.simplefilter("ignore")
+
+import subprocess
 from src.assistant import JarvisAssistant
 
 
@@ -30,13 +40,15 @@ def main():
         return
     
     # Initialize assistant
+    print("Initializing Jarvis Assistant...")
     try:
         assistant = JarvisAssistant()
+        print("Jarvis Assistant ready!\n")
     except Exception as e:
         print(f"\nFailed to initialize assistant: {e}")
         return
     
-    print("💡 Tips:")
+    print("Tips:")
     print("  - Ask about weather: 'What's the weather in New York?'")
     print("  - Current events: 'latest news' or 'who is the president?'")
     print("  - General questions: 'What is Python?'")

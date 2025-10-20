@@ -13,8 +13,9 @@ try:
     import chromadb
     from chromadb.utils import embedding_functions
     CHROMADB_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     CHROMADB_AVAILABLE = False
+    CHROMADB_ERROR = str(e)
 
 
 # ============================================================================
@@ -147,44 +148,54 @@ class LLMBasedLearning(LearningEngine):
     def extract_facts(self, text, context=None):
         """Use LLM to extract facts from conversation"""
         
-        analysis_prompt = f"""Analyze this conversation and extract important personal information.
+        # Skip if message is too short or is a question
+        if len(text.split()) < 3:
+            return []
+        
+        # Don't try to learn from questions
+        question_words = ['what', 'where', 'when', 'who', 'why', 'how', 'is', 'are', 'do', 'does', 'can', 'could', 'would']
+        if any(text.lower().strip().startswith(q) for q in question_words):
+            return []
+        
+        analysis_prompt = f"""Extract personal information from this statement.
 
 User said: "{text}"
 
-Extract information about:
-- Identity (name, age, location, occupation, education)
-- Interests & hobbies
-- Relationships (family, friends, pets)
-- Events & experiences
-- Preferences & opinions
-- Goals & problems
-- Daily routines
+What facts can we learn? Examples:
+- "I love pineapple pizza" → User likes pineapple pizza (preferences)
+- "My name is Alex" → User's name is Alex (identity)
+- "I live in Seattle" → User lives in Seattle (identity)
 
-Format as JSON list with confidence scores:
+Return JSON list:
 [
-  {{"fact": "User's name is Alex", "category": "identity", "confidence": 0.95}},
-  {{"fact": "User enjoys gaming", "category": "interests", "confidence": 0.85}}
+  {{"fact": "User likes pineapple pizza", "category": "preferences", "confidence": 0.90}}
 ]
 
-Rules:
-- Only extract explicitly stated or strongly implied facts
-- Confidence: 0.0-1.0 (only return if >0.7)
-- Categories: identity, interests, relationships, events, preferences, goals, routines, other
-- Empty list [] if nothing to extract
+Categories: identity, interests, preferences, relationships, events, goals, routines, other
+Only extract if confidence > 0.7. Return [] if nothing to extract.
 
 JSON only:"""
         
         try:
             response = self.llm.generate(analysis_prompt, use_search_context=False)
+            
+            # Try to find JSON in response
             json_match = re.search(r'\[.*?\]', response, re.DOTALL)
             
             if json_match:
                 facts = json.loads(json_match.group(0))
-                # Filter by confidence
-                return [f for f in facts if f.get('confidence', 0) >= 0.7]
+                # Filter by confidence and clean up
+                valid_facts = []
+                for f in facts:
+                    if f.get('confidence', 0) >= 0.7:
+                        # Make sure fact is well-formed
+                        fact_text = f.get('fact', '').strip()
+                        if len(fact_text) > 5:
+                            valid_facts.append(f)
+                return valid_facts
             
         except Exception as e:
-            print(f"[Learning Error]: {e}")
+            print(f"[LLM Learning Error]: {e}")
         
         return []
 
@@ -196,6 +207,10 @@ class PatternBasedLearning(LearningEngine):
         """Extract facts using improved pattern matching"""
         facts = []
         text_lower = text.lower()
+        
+        # Skip questions
+        if any(text_lower.strip().startswith(q) for q in ['what', 'where', 'when', 'who', 'why', 'how', 'is', 'are', 'do', 'does']):
+            return []
         
         # Pattern: Name
         name_patterns = [
@@ -209,16 +224,17 @@ class PatternBasedLearning(LearningEngine):
             (r"(?:based in|located in)\s+([A-Z][a-z]+)", "identity", 0.85),
         ]
         
-        # Pattern: Interests (improved)
-        interest_patterns = [
-            (r"i (?:love|really like|enjoy|am into)\s+([a-z\s]{3,30})(?:\.|!|,|\s+and\s)", "interests", 0.85),
-            (r"(?:big fan of|passionate about)\s+([a-z\s]{3,30})", "interests", 0.88),
+        # Pattern: Preferences (IMPROVED for pizza/food)
+        preference_patterns = [
+            (r"i (?:love|really like|like|enjoy)\s+([a-z\s]{3,30}?)(?:\s+pizza|\s+food|\.|!|,)", "preferences", 0.88),
+            (r"(?:big fan of|passionate about)\s+([a-z\s]{3,30})", "preferences", 0.85),
+            (r"i prefer\s+([^.!?]+?)(?:\s+over|\s+to)", "preferences", 0.85),
+            (r"my (?:favorite|favourite|fav)\s+([a-z]+)\s+is\s+([^.!?]+)", "preferences", 0.92),
         ]
         
-        # Pattern: Preferences
-        preference_patterns = [
-            (r"i prefer\s+([^.!?]+?)(?:\s+over|\s+to)", "preferences", 0.85),
-            (r"my favorite\s+([a-z]+)\s+is\s+([^.!?]+)", "preferences", 0.90),
+        # Pattern: Interests
+        interest_patterns = [
+            (r"i (?:love|really like|enjoy|am into)\s+([a-z\s]{3,30})(?:\.|!|,|\s+and\s)", "interests", 0.85),
         ]
         
         # Pattern: Goals/Plans
@@ -228,14 +244,18 @@ class PatternBasedLearning(LearningEngine):
         ]
         
         all_patterns = (
-            name_patterns + location_patterns + interest_patterns + 
-            preference_patterns + goal_patterns
+            name_patterns + location_patterns + preference_patterns + 
+            interest_patterns + goal_patterns
         )
         
         for pattern, category, confidence in all_patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 fact = match.group(0).strip()
+                # Clean up common issues
+                fact = re.sub(r'\s+', ' ', fact)  # Multiple spaces
+                fact = fact.rstrip('.,!?')  # Trailing punctuation
+                
                 if len(fact) > 5 and len(fact.split()) < 15:  # Reasonable length
                     facts.append({
                         "fact": fact,
@@ -253,14 +273,28 @@ class SemanticContextRetriever(ContextRetriever):
         if not CHROMADB_AVAILABLE:
             raise ImportError("ChromaDB required for semantic search")
         
-        self.client = chromadb.PersistentClient(path=persist_directory)
-        self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="all-MiniLM-L6-v2"
-        )
-        self.collection = self.client.get_or_create_collection(
-            name="jarvis_semantic_memory",
-            embedding_function=self.embedding_function
-        )
+        print(f"  - Initializing semantic search in {persist_directory}...")
+        
+        try:
+            self.client = chromadb.PersistentClient(path=persist_directory)
+            print(f"  - ChromaDB client created")
+            
+            self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
+                model_name="all-MiniLM-L6-v2"
+            )
+            print(f"  - Embedding function loaded")
+            
+            self.collection = self.client.get_or_create_collection(
+                name="jarvis_semantic_memory",
+                embedding_function=self.embedding_function
+            )
+            print(f"  - Semantic search: enabled")
+        except Exception as e:
+            import traceback
+            print(f"  - Semantic search initialization failed:")
+            print(f"    Error: {str(e)}")
+            traceback.print_exc()
+            raise Exception(f"Failed to initialize semantic search: {str(e)}")
     
     def add_fact(self, fact, metadata):
         """Add fact to semantic search index"""
@@ -336,7 +370,8 @@ class ModularMemorySystem:
                     os.path.join(data_dir, "semantic_db")
                 )
             except Exception as e:
-                print(f"⚠️ Semantic search unavailable: {e}")
+                print(f"  - Semantic search: disabled ({str(e)[:50]}...)")
+                self.context_retriever = None
         
         # Stats tracking
         self.stats = {
@@ -349,7 +384,6 @@ class ModularMemorySystem:
         print(f"✓ Memory system initialized")
         print(f"  - Storage: {type(self.storage).__name__}")
         print(f"  - Learning engines: {len(self.learning_engines)}")
-        print(f"  - Semantic search: {'enabled' if self.context_retriever else 'disabled'}")
     
     def learn_from_conversation(self, user_message, assistant_response=None):
         """
@@ -477,35 +511,3 @@ class ModularMemorySystem:
         print("  Ready for fine-tuning when you need it!")
         
         return filepath
-
-
-# ============================================================================
-# UPGRADE EXAMPLES (for future you!)
-# ============================================================================
-
-"""
-FUTURE UPGRADES - Just swap out components:
-
-1. Better Storage:
-   class PostgreSQLMemoryBackend(MemoryBackend):
-       # Store in real database instead of JSON
-       
-2. Advanced Learning:
-   class TransformerBasedLearning(LearningEngine):
-       # Use dedicated NER/entity extraction model
-       
-3. Cloud Sync:
-   class CloudMemoryBackend(MemoryBackend):
-       # Sync across devices
-       
-4. Graph-based Memory:
-   class GraphContextRetriever(ContextRetriever):
-       # Build knowledge graph of relationships
-       
-5. Fine-tuned Model:
-   class FineTunedLearning(LearningEngine):
-       # Use your own fine-tuned model for learning
-
-Just implement the base class interface and plug it in!
-No need to rewrite everything.
-"""

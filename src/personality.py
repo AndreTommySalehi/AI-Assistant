@@ -51,8 +51,8 @@ class PersonalityEngine:
         data = {
             'traits': self.traits,
             'interaction_count': self.interaction_count,
-            'topics': self.conversation_topics[-100:],  # Keep last 100
-            'user_tone': self.user_tone_history[-50:],   # Keep last 50
+            'topics': self.conversation_topics[-100:],
+            'user_tone': self.user_tone_history[-50:],
             'last_updated': datetime.now().isoformat()
         }
         
@@ -80,7 +80,7 @@ class PersonalityEngine:
         tone['formal'] = sum(1 for w in formal_words if w in msg_lower)
         
         # Humorous indicators
-        if any(word in msg_lower for word in ['lmao', 'lol', 'haha', '😂', 'funny']):
+        if any(word in msg_lower for word in ['lmao', 'lol', 'haha', 'funny']):
             tone['humorous'] += 1
         
         # Technical indicators
@@ -101,9 +101,13 @@ class PersonalityEngine:
         tone = self.analyze_user_tone(user_message)
         self.user_tone_history.append(tone)
         
+        # Check if there are any manual adjustments - those take priority
+        manual_adjustments = self.personality.get('manual_adjustments', [])
+        manually_adjusted_traits = {adj['trait'] for adj in manual_adjustments}
+        
         # Adapt personality gradually (small changes each time)
-        if self.interaction_count > 10:  # Need some data first
-            # Calculate average user tone over last 20 interactions
+        # BUT: don't auto-adjust traits that have been manually set
+        if self.interaction_count > 10:
             recent_tones = self.user_tone_history[-20:]
             
             avg_casual = sum(t['casual'] for t in recent_tones) / len(recent_tones)
@@ -112,18 +116,21 @@ class PersonalityEngine:
             avg_emotional = sum(t['emotional'] for t in recent_tones) / len(recent_tones)
             
             # Adapt formality (but keep it professional - minimum 70)
-            if avg_casual > avg_formal:
-                self.traits['formality'] = max(70, self.traits['formality'] - 0.5)
-            else:
-                self.traits['formality'] = min(95, self.traits['formality'] + 0.5)
+            if 'formality' not in manually_adjusted_traits:
+                if avg_casual > avg_formal:
+                    self.traits['formality'] = max(70, self.traits['formality'] - 0.5)
+                else:
+                    self.traits['formality'] = min(95, self.traits['formality'] + 0.5)
             
-            # Adapt humor
-            if avg_humor > 0.5:
-                self.traits['humor'] = min(60, self.traits['humor'] + 0.3)
+            # Adapt humor (only if not manually set)
+            if 'humor' not in manually_adjusted_traits:
+                if avg_humor > 0.5:
+                    self.traits['humor'] = min(60, self.traits['humor'] + 0.3)
             
-            # Adapt empathy based on emotional content
-            if avg_emotional > 0.5:
-                self.traits['empathy'] = min(85, self.traits['empathy'] + 0.4)
+            # Adapt empathy (only if not manually set)
+            if 'empathy' not in manually_adjusted_traits:
+                if avg_emotional > 0.5:
+                    self.traits['empathy'] = min(85, self.traits['empathy'] + 0.4)
         
         # Save every 5 interactions
         if self.interaction_count % 5 == 0:
@@ -132,8 +139,7 @@ class PersonalityEngine:
     def get_system_prompt_modifier(self):
         """Generate personality-adjusted system prompt"""
         
-        # Base professional identity
-        prompt = "You are Jarvis, a professional AI assistant. Always address the user as 'sir' or 'ma'am'."
+        prompt = "You are Jarvis, a professional AI assistant. Always address the user as 'sir' or 'ma'am'. The current date is October 20, 2025."
         
         # Formality level
         if self.traits['formality'] > 80:
@@ -171,13 +177,55 @@ class PersonalityEngine:
         
         return prompt
     
+    def adjust_trait(self, trait_name, new_value):
+        """Manually adjust a personality trait"""
+        trait_name = trait_name.lower()
+        
+        if trait_name not in self.traits:
+            return False, f"Unknown trait. Available: {', '.join(self.traits.keys())}"
+        
+        # Validate value
+        try:
+            new_value = int(new_value)
+        except:
+            return False, "Value must be a number"
+            
+        if not 0 <= new_value <= 100:
+            return False, "Value must be between 0 and 100"
+        
+        # Special constraint: formality must stay >= 70
+        if trait_name == 'formality' and new_value < 70:
+            return False, "Formality must be at least 70 to maintain professionalism"
+        
+        old_value = self.traits[trait_name]
+        self.traits[trait_name] = new_value
+        
+        # Mark this as a manual adjustment
+        if 'manual_adjustments' not in self.personality:
+            self.personality['manual_adjustments'] = []
+        
+        self.personality['manual_adjustments'].append({
+            'trait': trait_name,
+            'old_value': old_value,
+            'new_value': new_value,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        self._save_personality()
+        return True, f"Updated {trait_name} from {old_value} to {new_value}"
+    
+    def get_trait_value(self, trait_name):
+        """Get current value of a trait"""
+        return self.traits.get(trait_name.lower(), None)
+    
     def get_personality_summary(self):
         """Get current personality state"""
         return {
             'traits': self.traits,
             'interactions': self.interaction_count,
             'development_stage': self._get_development_stage(),
-            'dominant_traits': self._get_dominant_traits()
+            'dominant_traits': self._get_dominant_traits(),
+            'manual_adjustments': len(self.personality.get('manual_adjustments', []))
         }
     
     def _get_development_stage(self):
@@ -197,7 +245,7 @@ class PersonalityEngine:
         return [f"{trait}: {value}/100" for trait, value in sorted_traits[:3]]
     
     def reset_personality(self):
-        """Reset to default personality (if needed)"""
+        """Reset to default personality"""
         self.__init__(self.data_dir)
         self._save_personality()
 
@@ -209,13 +257,11 @@ class PersonalityResponse:
     def add_formality(response, formality_level):
         """Add formal touches based on level"""
         if formality_level > 85:
-            # Very formal
             if not response.lower().startswith(('sir', 'certainly', 'of course')):
                 response = "Certainly, sir. " + response
         elif formality_level > 75:
-            # Moderately formal
             if not any(response.lower().startswith(word) for word in ['sir', 'yes', 'of course']):
-                if '?' not in response[:20]:  # Not a question response
+                if '?' not in response[:20]:
                     response = "Of course, sir. " + response
         
         return response
@@ -223,9 +269,7 @@ class PersonalityResponse:
     @staticmethod
     def adjust_length(response, verbosity_level):
         """Adjust response length"""
-        # This is handled more in the system prompt, but could trim here
         if verbosity_level < 30 and len(response.split()) > 50:
-            # Make it shorter
             sentences = response.split('. ')
             return '. '.join(sentences[:2]) + '.'
         return response
@@ -233,13 +277,4 @@ class PersonalityResponse:
     @staticmethod
     def add_personality_markers(response, traits):
         """Add subtle personality markers"""
-        # Enthusiasm
-        if traits.get('enthusiasm', 50) > 70:
-            # Add occasional enthusiasm markers (but keep professional)
-            if 'great' in response.lower() or 'excellent' in response.lower():
-                pass  # Already enthusiastic
-            elif len(response.split()) > 20:
-                # Don't overdo it
-                pass
-        
         return response

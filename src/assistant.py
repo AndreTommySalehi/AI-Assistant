@@ -8,7 +8,17 @@ import re
 from .llm import LLMHandler
 from .search import WebSearch
 from .modular_memory import ModularMemorySystem
-from .personality import PersonalityEngine, PersonalityResponse
+
+# Try to import personality - optional
+try:
+    from .personality import PersonalityEngine, PersonalityResponse
+    PERSONALITY_AVAILABLE = True
+    print("  - Personality system: enabled")
+except ImportError as e:
+    PERSONALITY_AVAILABLE = False
+    PersonalityEngine = None
+    PersonalityResponse = None
+    print(f"  - Personality system: disabled (personality.py not found)")
 
 
 class JarvisAssistant:
@@ -31,6 +41,13 @@ class JarvisAssistant:
             config=memory_config or {}
         )
         
+        # Initialize PERSONALITY system (if available)
+        if PERSONALITY_AVAILABLE:
+            self.personality = PersonalityEngine()
+        else:
+            self.personality = None
+            print("  Note: Personality system disabled (create src/personality.py to enable)")
+        
         # Search cache (simple dict for now)
         self.search_cache = {}
         
@@ -49,6 +66,10 @@ class JarvisAssistant:
         try:
             self.message_count += 1
             
+            # Evolve personality based on this interaction (if available)
+            if self.personality:
+                self.personality.evolve_personality(user_input)
+            
             # Add user message to history
             self.conversation_history.append({
                 'role': 'user',
@@ -61,6 +82,21 @@ class JarvisAssistant:
                 response = self._handle_search_query(user_input)
             else:
                 response = self._handle_general_query(user_input)
+            
+            # Apply personality adjustments to response (if available)
+            if self.personality and PERSONALITY_AVAILABLE:
+                response = PersonalityResponse.add_formality(
+                    response, 
+                    self.personality.traits['formality']
+                )
+                response = PersonalityResponse.adjust_length(
+                    response,
+                    self.personality.traits['verbosity']
+                )
+                response = PersonalityResponse.add_personality_markers(
+                    response,
+                    self.personality.traits
+                )
             
             # Add assistant response to history
             self.conversation_history.append({
@@ -104,11 +140,17 @@ class JarvisAssistant:
         # Get relevant context from memory
         context = self.memory.get_context_for_query(user_input)
         
+        # Get personality-adjusted system prompt (if available)
+        if self.personality:
+            personality_prompt = self.personality.get_system_prompt_modifier()
+        else:
+            personality_prompt = "You are Jarvis, a professional AI assistant. Always address the user as 'sir' or 'ma'am'. The current date is October 20, 2025."
+        
         # Build enhanced prompt
         if context:
-            enhanced_input = f"{context}\n\n---\n\nUser's current message: {user_input}\n\nRespond naturally, referencing what you know about them when relevant."
+            enhanced_input = f"{personality_prompt}\n\n{context}\n\n---\n\nUser's current message: {user_input}\n\nRespond naturally, referencing what you know about them when relevant."
         else:
-            enhanced_input = user_input
+            enhanced_input = f"{personality_prompt}\n\nUser: {user_input}"
         
         return self.llm.generate_with_history(enhanced_input, self.conversation_history)
     

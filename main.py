@@ -6,6 +6,7 @@ Modular system with easy upgrades!
 import warnings
 import sys
 import os
+import re
 
 warnings.filterwarnings("ignore")
 os.environ['PYTHONWARNINGS'] = 'ignore::RuntimeWarning'
@@ -22,7 +23,7 @@ def verify_ollama():
         subprocess.run(["ollama", "list"], capture_output=True, check=True)
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("❌ Ollama not found. Install from https://ollama.ai")
+        print("Ollama not found. Install from https://ollama.ai")
         return False
 
 
@@ -30,22 +31,89 @@ def print_help():
     """Show available commands"""
     print("""
 Available Commands:
-  stats          - Show detailed memory statistics
-  show facts     - Display all stored facts (last 10)
-  export         - Export training data for fine-tuning
-  learn on/off   - Toggle auto-learning on or off
-  remember [msg] - Manually remember something
-  clear          - Clear conversation history (memory preserved)
-  help           - Show this message
-  exit/quit      - Save and quit
+  stats              - Show detailed memory statistics
+  personality        - Show personality development status
+  set [trait] [val]  - Adjust personality trait (e.g., 'set humor 50')
+  show facts         - Display all stored facts (last 10)
+  export             - Export training data for fine-tuning
+  learn on/off       - Toggle auto-learning on or off
+  remember [msg]     - Manually remember something
+  clear              - Clear conversation history (memory preserved)
+  help               - Show this message
+  exit/quit          - Save and quit
     """)
+
+
+def is_personality_adjustment(user_input):
+    """Check if the input is trying to adjust personality"""
+    user_lower = user_input.lower()
+    
+    # Check for personality adjustment patterns
+    adjustment_patterns = [
+        r'(increase|raise|boost|up|higher)\s+(.*?)\s+to\s+(\d+)',
+        r'(decrease|lower|reduce|down)\s+(.*?)\s+to\s+(\d+)',
+        r'make\s+(.*?)\s+(more|less|higher|lower)',
+        r'set\s+(.*?)\s+to\s+(\d+)',
+    ]
+    
+    for pattern in adjustment_patterns:
+        if re.search(pattern, user_lower):
+            return True
+    
+    return False
+
+
+def parse_personality_command(user_input):
+    """Parse natural language personality adjustments"""
+    user_lower = user_input.lower()
+    
+    # Available traits
+    traits = ['formality', 'humor', 'verbosity', 'enthusiasm', 'directness', 'empathy']
+    
+    # Pattern 1: "increase/raise humor to 60"
+    match = re.search(r'(increase|raise|boost|up|higher)\s+(.*?)\s+to\s+(\d+)', user_lower)
+    if match:
+        trait = match.group(2).strip()
+        value = match.group(3)
+        for t in traits:
+            if t in trait:
+                return t, value
+    
+    # Pattern 2: "decrease/lower humor to 40"
+    match = re.search(r'(decrease|lower|reduce|down)\s+(.*?)\s+to\s+(\d+)', user_lower)
+    if match:
+        trait = match.group(2).strip()
+        value = match.group(3)
+        for t in traits:
+            if t in trait:
+                return t, value
+    
+    # Pattern 3: "set humor to 50" or "set humor 50"
+    match = re.search(r'set\s+(\w+)\s+(?:to\s+)?(\d+)', user_lower)
+    if match:
+        trait = match.group(1).strip()
+        value = match.group(2)
+        for t in traits:
+            if t in trait:
+                return t, value
+    
+    # Pattern 4: "make humor higher/lower"
+    match = re.search(r'make\s+(\w+)\s+(more|less|higher|lower)', user_lower)
+    if match:
+        trait = match.group(1).strip()
+        direction = match.group(2)
+        for t in traits:
+            if t in trait:
+                # Get current value and adjust
+                return t, None  # Signal that we need to get current value
+    
+    return None, None
 
 
 def main():
     print("""
     ╔═══════════════════════════════════════╗
     ║              JARVIS AI                ║
-    ║           Created by Andre S          ║
     ╚═══════════════════════════════════════╝
     """)
     
@@ -56,6 +124,14 @@ def main():
     # Initialize assistant
     print("Initializing Jarvis...")
     try:
+        # Check if personality module exists
+        try:
+            from src.personality import PersonalityEngine
+            personality_available = True
+        except ImportError:
+            personality_available = False
+            print("Note: Personality system not available (personality.py not found)")
+        
         # Enable debug mode temporarily
         assistant = JarvisAssistant(debug=True)
         
@@ -65,7 +141,10 @@ def main():
         print(f"   Total facts: {stats['total_facts']}")
         print(f"   Storage: {stats['storage_backend']}")
         print(f"   Learning engines: {len(stats['learning_engines'])}")
-        print(f"   Semantic search: {'enabled' if stats['semantic_search'] else 'disabled (install: pip install sentence-transformers)'}")
+        if stats['semantic_search']:
+            print(f"   Semantic search: enabled")
+        else:
+            print(f"   Semantic search: disabled")
         
     except Exception as e:
         print(f"\nFailed to initialize: {e}")
@@ -120,22 +199,48 @@ def main():
                 
                 continue
             
-            # Personality command (NEW)
+            # Personality command
             if user_input.lower() == 'personality':
-                personality = assistant.personality.get_personality_summary()
-                print(f"\nPersonality Status:")
-                print(f"   Development: {personality['development_stage']}")
-                print(f"   Total interactions: {personality['interactions']}")
-                print(f"\nCurrent Traits:")
-                for trait, value in personality['traits'].items():
-                    bar = '█' * (value // 5) + '░' * (20 - value // 5)
-                    print(f"   {trait.capitalize():12} [{bar}] {value}/100")
-                print(f"\nDominant Traits:")
-                for trait in personality['dominant_traits']:
-                    print(f"   - {trait}")
+                if hasattr(assistant, 'personality') and assistant.personality:
+                    personality = assistant.personality.get_personality_summary()
+                    print(f"\nPersonality Status:")
+                    print(f"   Development: {personality['development_stage']}")
+                    print(f"   Total interactions: {personality['interactions']}")
+                    print(f"   Manual adjustments: {personality['manual_adjustments']}")
+                    print(f"\nCurrent Traits:")
+                    for trait, value in personality['traits'].items():
+                        bar = '█' * (value // 5) + '░' * (20 - value // 5)
+                        print(f"   {trait.capitalize():12} [{bar}] {value}/100")
+                    print(f"\nDominant Traits:")
+                    for trait in personality['dominant_traits']:
+                        print(f"   - {trait}")
+                    print(f"\nTip: Use 'set [trait] [value]' to adjust (e.g., 'set humor 50')")
+                else:
+                    print("\nPersonality system not initialized. Please restart Jarvis.")
                 continue
             
-            # Show facts command (NEW - for debugging)
+            # Set trait command - now supports natural language!
+            if user_input.lower().startswith('set ') or is_personality_adjustment(user_input):
+                if hasattr(assistant, 'personality') and assistant.personality:
+                    # Try to parse natural language first
+                    trait, value = parse_personality_command(user_input)
+                    
+                    if trait and value:
+                        success, message = assistant.personality.adjust_trait(trait, value)
+                        if success:
+                            print(f"\n[*] {message}")
+                            print(f"    This setting will be preserved across sessions.")
+                        else:
+                            print(f"\nError: {message}")
+                    else:
+                        print("\nUsage: set [trait] [value]")
+                        print("Or say naturally: 'increase humor to 60', 'lower formality to 75', etc.")
+                        print(f"Available traits: formality, humor, verbosity, enthusiasm, directness, empathy")
+                else:
+                    print("\nPersonality system not initialized. Please restart Jarvis.")
+                continue
+            
+            # Show facts command
             if user_input.lower() == 'show facts':
                 facts = assistant.memory.storage.get_all_facts()
                 if facts:
@@ -198,6 +303,8 @@ def main():
             break
         except Exception as e:
             print(f"\nError: {str(e)}")
+            import traceback
+            traceback.print_exc()
             print("Please try again or type 'exit' to quit.")
 
 

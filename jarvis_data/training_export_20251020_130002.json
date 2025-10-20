@@ -1,11 +1,16 @@
 {
+  "metadata": {
+    "exported": "2025-10-20T13:00:02.683872",
+    "total_facts": 7,
+    "format": "jarvis_v1"
+  },
   "facts": [
     {
       "fact": "User lives in Northridge, LA",
       "category": "identity",
       "timestamp": "2025-10-19T20:38:34.170020",
-      "access_count": 4,
-      "last_accessed": "2025-10-20T13:33:50.581377",
+      "access_count": 2,
+      "last_accessed": "2025-10-19T20:45:00.732345",
       "metadata": {
         "confidence": 0.95,
         "engine": "LLMBasedLearning",
@@ -16,8 +21,8 @@
       "fact": "User enjoys pineapple pizza",
       "category": "preferences",
       "timestamp": "2025-10-19T20:38:34.170020",
-      "access_count": 4,
-      "last_accessed": "2025-10-20T13:33:50.581377",
+      "access_count": 2,
+      "last_accessed": "2025-10-19T20:45:00.732345",
       "metadata": {
         "confidence": 1.0,
         "engine": "LLMBasedLearning",
@@ -28,8 +33,8 @@
       "fact": "User lives in California",
       "category": "identity",
       "timestamp": "2025-10-19T20:45:03.590935",
-      "access_count": 2,
-      "last_accessed": "2025-10-20T13:33:50.581377",
+      "access_count": 0,
+      "last_accessed": null,
       "metadata": {
         "confidence": 1.0,
         "engine": "LLMBasedLearning",
@@ -40,8 +45,8 @@
       "fact": "I live in california btw",
       "category": "identity",
       "timestamp": "2025-10-19T20:45:03.591973",
-      "access_count": 2,
-      "last_accessed": "2025-10-20T13:33:50.581377",
+      "access_count": 0,
+      "last_accessed": null,
       "metadata": {
         "confidence": 0.88,
         "engine": "PatternBasedLearning",
@@ -52,8 +57,8 @@
       "fact": "User has a German Shepherd dog",
       "category": "relationships",
       "timestamp": "2025-10-19T20:45:49.360051",
-      "access_count": 3,
-      "last_accessed": "2025-10-20T13:33:50.581377",
+      "access_count": 1,
+      "last_accessed": "2025-10-19T20:46:37.052933",
       "metadata": {
         "confidence": 1.0,
         "engine": "LLMBasedLearning",
@@ -64,8 +69,8 @@
       "fact": "User has a pet named Comet",
       "category": "relationships",
       "timestamp": "2025-10-19T20:46:22.226209",
-      "access_count": 3,
-      "last_accessed": "2025-10-20T13:33:50.581377",
+      "access_count": 1,
+      "last_accessed": "2025-10-19T20:46:37.052933",
       "metadata": {
         "confidence": 1.0,
         "engine": "LLMBasedLearning",
@@ -76,14 +81,13 @@
       "fact": "Comet is turning 7 on October 28th",
       "category": "events",
       "timestamp": "2025-10-19T20:46:22.226209",
-      "access_count": 3,
-      "last_accessed": "2025-10-20T13:41:30.933303",
+      "access_count": 0,
+      "last_accessed": null,
       "metadata": {
         "confidence": 1.0,
         "engine": "LLMBasedLearning",
         "learned_from": "Yeah hes great his name is comet and hes turning 7 this october 28!"
       }
     }
-  ],
-  "metadata": {}
+  ]
 }

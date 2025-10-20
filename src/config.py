@@ -2,18 +2,19 @@
 Configuration with GPT-OSS (HuggingFace) support
 """
 
-# Ollama Models
-DEFAULT_MODEL = "llama3.1:8b"  # Primary Ollama model
-SECONDARY_MODEL = "mistral:7b"  # Secondary for comparison
-
-# GPT-OSS Configuration (HuggingFace)
+# GPT-OSS Configuration (HuggingFace) - PRIMARY MODEL
 USE_GPT_OSS = True  # Set to True to use GPT-OSS
-GPT_OSS_MODEL = "openai/gpt-oss-20b"  # or "openai/gpt-oss-120b" (needs more RAM)
+GPT_OSS_MODEL = "openai/gpt-oss-20b"  # Primary model - has 2024 training data!
 GPT_OSS_MAX_TOKENS = 512  # Max response length
+GPT_OSS_PRIORITY = True  # Make GPT-OSS the primary responder
+
+# Ollama Models - BACKUP ONLY
+DEFAULT_MODEL = "llama3.1:8b"  # Fallback Ollama model
+SECONDARY_MODEL = None  # Disable secondary to save resources
 
 # A/B Testing
-ENABLE_AB_TESTING = True  # Compare all models - MUST BE TRUE FOR GPT-OSS
-CONFIDENCE_THRESHOLD = 50  # Lower threshold so models compete fairly
+ENABLE_AB_TESTING = True  # GPT-OSS vs Ollama
+CONFIDENCE_THRESHOLD = 30  # Lower threshold - let GPT-OSS win more often
 
 # Search Configuration
 SEARCH_TIMEOUT = 30
@@ -31,12 +32,24 @@ CREDIBLE_DOMAINS = [
 
 # Search trigger keywords
 SEARCH_KEYWORDS = [
+    # Time-based
     'weather', 'news', 'today', 'now', 'current', 'latest',
-    'recent', 'president', 'what is happening', 'who is',
-    'stock', 'price', 'score', 'election', 'update', 'forecast',
+    'recent', 'update', 'forecast', 'right now', 'this week',
+    
+    # People/Politics
+    'president', 'who is', 'elected', 'winner', 'election',
+    
+    # Finance
+    'stock', 'price', 'cost', 'worth', 'bitcoin', 'crypto',
+    'trading', 'market', 'dollar', 'USD', 'exchange rate',
+    
+    # Weather specific
     'temperature', 'celsius', 'fahrenheit', 'rain', 'sunny',
-    '2024', '2025', 'bitcoin', 'crypto', 'cost', 'worth',
-    'trading at', 'right now'
+    'cloudy', 'storm', 'snow', 'forecast',
+    
+    # General search triggers
+    'what is happening', 'happening now', 'score', 'result',
+    '2024', '2025', 'search for', 'look up', 'find out'
 ]
 
 # Model generation options

@@ -1,2 +1,8 @@
 ollama
-ddgs
+requests
+beautifulsoup4
+lxml
+transformers
+torch
+accelerate
+sentencepiece

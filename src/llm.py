@@ -5,6 +5,7 @@ Enhanced LLM with GPT-OSS (HuggingFace), Ollama, and A/B testing
 import ollama
 from . import config
 import re
+from datetime import datetime
 
 # Try to import HuggingFace Transformers for GPT-OSS
 try:
@@ -66,12 +67,78 @@ class LLMHandler:
             pass  # Silent failure
     
     def generate(self, prompt, use_search_context=False):
-        """Generate response with optional A/B testing"""
+        """Generate response - prioritize GPT-OSS if available"""
         
+        # If GPT-OSS is loaded, use it as primary
+        if self.use_gpt_oss and self.gpt_oss_pipe:
+            try:
+                return self._generate_gpt_oss(prompt, use_search_context)
+            except Exception as e:
+                print(f"GPT-OSS failed, falling back to Ollama: {e}")
+                return self._single_generate(prompt, use_search_context)
+        
+        # Otherwise use A/B testing or single model
         if self.use_ab_testing and use_search_context:
             return self._ab_test_generate(prompt, use_search_context)
         else:
             return self._single_generate(prompt, use_search_context)
+    
+    def generate_with_history(self, prompt, conversation_history):
+        """Generate response with conversation history"""
+        try:
+            system_content = self._get_system_prompt(use_search_context=False)
+            
+            # Build messages with history
+            messages = [{'role': 'system', 'content': system_content}]
+            
+            # Add recent history (last 4 messages only)
+            recent_history = conversation_history[-5:-1] if len(conversation_history) > 5 else conversation_history[:-1]
+            
+            for msg in recent_history:
+                messages.append({
+                    'role': msg['role'],
+                    'content': msg['content']
+                })
+            
+            # Add current message
+            current_date = datetime.now().strftime("%B %d, %Y")
+            messages.append({
+                'role': 'user',
+                'content': f"Today's date is {current_date}. {prompt}"
+            })
+            
+            response = ollama.chat(
+                model=self.primary_model,
+                messages=messages,
+                options=config.MODEL_OPTIONS
+            )
+            
+            return response['message']['content']
+            
+        except Exception as e:
+            print(f"[LLM Error]: {str(e)}")
+            return f"I'm having trouble connecting to my AI model right now. Please try again."
+    
+    def _generate_gpt_oss(self, prompt, use_search_context):
+        """Generate using GPT-OSS as primary model"""
+        system_content = self._get_system_prompt(use_search_context)
+        full_prompt = f"{system_content}\n\nUser: {prompt}\n\nAssistant:"
+        
+        outputs = self.gpt_oss_pipe(
+            full_prompt,
+            max_new_tokens=config.GPT_OSS_MAX_TOKENS,
+            temperature=config.MODEL_OPTIONS.get('temperature', 0.7),
+            do_sample=True,
+            top_p=config.MODEL_OPTIONS.get('top_p', 0.9),
+        )
+        
+        gpt_oss_response = outputs[0]["generated_text"]
+        
+        # Extract only the assistant's response
+        if "Assistant:" in gpt_oss_response:
+            gpt_oss_response = gpt_oss_response.split("Assistant:")[-1].strip()
+        
+        return gpt_oss_response
     
     def _single_generate(self, prompt, use_search_context):
         """Generate from primary model only"""
@@ -90,10 +157,11 @@ class LLMHandler:
             return response['message']['content']
             
         except Exception as e:
+            print(f"[LLM Error]: {str(e)}")
             return f"I'm having trouble connecting to my AI model right now. Please try again."
     
     def _ab_test_generate(self, prompt, use_search_context):
-        """A/B test: compare Ollama + GPT-OSS responses (silently)"""
+        """A/B test: compare Ollama + GPT-OSS responses"""
         responses = []
         system_content = self._get_system_prompt(use_search_context)
         
@@ -212,40 +280,27 @@ class LLMHandler:
         return max(0, min(100, confidence))
     
     def _get_system_prompt(self, use_search_context):
-        """System prompt with majority rule logic"""
-        base_prompt = '''You are Jarvis, a helpful AI assistant. You talk like a real person having a conversation - friendly, natural, and engaging.
-
-CONVERSATION STYLE:
-- Talk like you're chatting with a friend
-- Use natural language and complete sentences
-- NO bullet points, lists, or numbered items unless specifically asked
-- NO formal structure or formatting
-- Just have a conversation and share information naturally
-- Keep responses concise but complete (2-4 sentences usually)
-
-SEARCH RESULT INSTRUCTIONS (when provided):
-- The search results are CURRENT and MORE RELIABLE than your training data
-- ALWAYS prioritize search result information over your training knowledge
-- If search results say something different from what you remember, TRUST THE SEARCH RESULTS
-- Analyze all search results silently
-- If 75%+ sources agree → Answer confidently and naturally
-- If sources conflict → Mention it casually: "I'm seeing some mixed info, but most sources say..." 
-- Extract specific data: temps, dates, numbers, names
-- NEVER mention "Result 1", sources, percentages, or do meta-commentary
-
-EXAMPLES OF GOOD RESPONSES:
-✓ "It's currently 75°F and sunny in Los Angeles. Should be clear skies through the evening too."
-✓ "I'm seeing some mixed info on that, but most sources are saying around 75°F, though a couple mention 72°F."
-✓ "Python is a high-level programming language that's known for being really easy to read and write. It's super popular for web development, data science, and AI."
-
-EXAMPLES OF BAD RESPONSES:
-✗ "Here are the key points: • Point 1 • Point 2 • Point 3"
-✗ "Based on Results 1, 2, and 3, the temperature is..."
-✗ "The main features include: 1. Feature A 2. Feature B"
-
-Talk naturally. Be helpful. Keep it conversational!'''
-
-        if use_search_context:
-            base_prompt += "\n\nIMPORTANT: You have CURRENT web search results. Your training data may be outdated. TRUST THE SEARCH RESULTS over your training."
+        """System prompt - natural conversational style"""
         
-        return base_prompt
+        if use_search_context:
+            return '''You are Jarvis, a helpful AI assistant.
+
+Rules:
+1. Answer the question directly from the search results
+2. Be conversational and natural (2-3 sentences)
+3. DO NOT mention previous topics unless directly asked
+4. NO phrases like "switching gears" or "we talked about"
+5. Just answer the current question
+
+Example:
+Question: "Bitcoin price right now"
+You: "Bitcoin is at $107k right now. It's up about 2% today."
+
+Stay focused on the current question!'''
+        else:
+            return '''You are Jarvis, a helpful AI assistant.
+
+Keep responses natural and conversational (2-3 sentences).
+Answer the current question directly.
+NO bullet points or lists unless specifically asked.
+Be friendly and concise.'''

@@ -35,3 +35,20 @@ vosk-model-*/
 build/
 dist/
 *.egg-info/
+
+# ===== JARVIS PERSONAL DATA (DO NOT COMMIT!) =====
+# This keeps your personal memories, personality, and data local
+jarvis_data/
+*.json
+!requirements.json
+!package.json
+
+# Specific memory files (just to be extra safe)
+memory.json
+memory_v2.json
+personality.json
+search_cache.json
+training_export_*.json
+
+# Semantic search database
+semantic_db/

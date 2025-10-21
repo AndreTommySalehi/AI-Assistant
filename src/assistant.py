@@ -11,14 +11,23 @@ from .modular_memory import ModularMemorySystem
 
 # Try to import personality - optional
 try:
-    from .personality import PersonalityEngine, PersonalityResponse
+    from .personality import PersonalityEngine
     PERSONALITY_AVAILABLE = True
     print("  - Personality system: enabled")
 except ImportError as e:
     PERSONALITY_AVAILABLE = False
     PersonalityEngine = None
-    PersonalityResponse = None
     print(f"  - Personality system: disabled (personality.py not found)")
+
+# Try to import news aggregator
+try:
+    from .news_aggregator import NewsAggregator
+    NEWS_AVAILABLE = True
+    print("  - News aggregator: enabled")
+except ImportError as e:
+    NEWS_AVAILABLE = False
+    NewsAggregator = None
+    print(f"  - News aggregator: disabled")
 
 
 class JarvisAssistant:
@@ -48,6 +57,13 @@ class JarvisAssistant:
             self.personality = None
             print("  Note: Personality system disabled (create src/personality.py to enable)")
         
+        # Initialize NEWS aggregator (if available)
+        if NEWS_AVAILABLE:
+            self.news = NewsAggregator()
+        else:
+            self.news = None
+            print("  Note: News aggregator disabled")
+        
         # Search cache (simple dict for now)
         self.search_cache = {}
         
@@ -66,6 +82,12 @@ class JarvisAssistant:
         try:
             self.message_count += 1
             
+            # Check for news request
+            news_keywords = ['news', 'today', 'daily recap', 'what happened', "what's happening", 
+                           'news summary', 'daily summary', 'current events']
+            if any(keyword in user_input.lower() for keyword in news_keywords) and self.news:
+                return self._handle_news_request(user_input)
+            
             # Evolve personality based on this interaction (if available)
             if self.personality:
                 self.personality.evolve_personality(user_input)
@@ -83,20 +105,8 @@ class JarvisAssistant:
             else:
                 response = self._handle_general_query(user_input)
             
-            # Apply personality adjustments to response (if available)
-            if self.personality and PERSONALITY_AVAILABLE:
-                response = PersonalityResponse.add_formality(
-                    response, 
-                    self.personality.traits['formality']
-                )
-                response = PersonalityResponse.adjust_length(
-                    response,
-                    self.personality.traits['verbosity']
-                )
-                response = PersonalityResponse.add_personality_markers(
-                    response,
-                    self.personality.traits
-                )
+            # NOTE: Personality adjustments are now handled in the system prompt
+            # No need for post-processing the response anymore!
             
             # Add assistant response to history
             self.conversation_history.append({
@@ -173,9 +183,17 @@ class JarvisAssistant:
         if any(word in search_results.lower() for word in ['error', 'unavailable', 'failed']):
             return self.llm.generate_with_history(user_input, self.conversation_history)
         
+        # Get personality prompt for search responses too
+        if self.personality:
+            personality_prompt = self.personality.get_system_prompt_modifier()
+        else:
+            personality_prompt = "You are JARVIS, an advanced AI assistant."
+        
         # Build search-enhanced prompt
         current_date = datetime.now().strftime("%B %d, %Y")
-        prompt = f"""TODAY'S DATE: {current_date}
+        prompt = f"""{personality_prompt}
+
+TODAY'S DATE: {current_date}
 
 USER QUESTION: {user_input}
 
@@ -199,6 +217,102 @@ Instructions: Answer the user's question using the search results above. Be conv
             self.search_cache = dict(sorted_cache[-25:])
         
         return response
+    
+    def _handle_news_request(self, user_input):
+        """Handle news/daily summary requests"""
+        print("\n", end="", flush=True)
+        
+        # Fetch news
+        summary = self.news.get_daily_summary()
+        
+        # Format for display
+        formatted = self.news.format_summary(summary)
+        print(formatted)
+        
+        # Also get LLM summary
+        news_text = self.news.get_summary_for_llm(summary)
+        
+        # Get personality prompt
+        if self.personality:
+            personality_prompt = self.personality.get_system_prompt_modifier()
+        else:
+            personality_prompt = "You are JARVIS, an advanced AI assistant."
+        
+        # Ask LLM to summarize with structure
+        prompt = f"""{personality_prompt}
+
+Here are today's top headlines from reputable news sources:
+
+{news_text}
+
+User asked: "{user_input}"
+
+Create a comprehensive daily briefing organized by category. For EACH category that has news:
+
+Format EXACTLY like this:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💻 TECHNOLOGY
+
+  • First major tech story here
+    Brief explanation of what happened and why it matters.
+    
+  • Second tech story headline
+    Context and impact in 1-2 sentences.
+    
+  • Third tech story if available
+    What you need to know about it.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📈 BUSINESS & MARKETS
+
+  • Stock market story
+    What happened in the markets and why.
+    
+  • Major business development
+    Impact on economy or industry.
+    
+  • Other business news
+    Key takeaways.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🌍 GENERAL NEWS
+
+  • Major world event
+    What happened and significance.
+    
+  • Important national story
+    Context and implications.
+    
+  • Other significant news
+    Key points to know.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔬 SCIENCE
+
+  • Scientific breakthrough
+    Explained in simple terms with impact.
+    
+  • Research findings
+    What was discovered and why it matters.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CRITICAL FORMATTING RULES:
+- Use the exact divider lines shown above (━━━━━)
+- Add blank line after each bullet point
+- Indent bullets with 2 spaces
+- Keep explanation under bullet, not on same line
+- Skip categories with no news
+- Be clear and informative"""
+        
+        llm_summary = self.llm.generate(prompt, use_search_context=False)
+        
+        return f"\n{llm_summary}"
     
     def toggle_learning(self, enabled=None):
         """Turn auto-learning on/off"""
@@ -250,60 +364,3 @@ Instructions: Answer the user's question using the search results above. Be conv
                 print(f"   {engine}: {count}")
         
         print("\nGoodbye!")
-
-
-# ============================================================================
-# UPGRADE GUIDE (Future You Will Thank Present You!)
-# ============================================================================
-
-"""
-HOW TO UPGRADE COMPONENTS:
-
-1. STORAGE UPGRADE (JSON → Database):
-   
-   # In modular_memory.py, create new backend:
-   class PostgreSQLMemoryBackend(MemoryBackend):
-       def __init__(self, connection_string):
-           self.conn = psycopg2.connect(connection_string)
-       # ... implement interface
-   
-   # In this file, just change:
-   memory_config = {'storage': 'postgresql', 'connection': 'postgres://...'}
-   assistant = JarvisAssistant(memory_config=memory_config)
-
-
-2. LEARNING UPGRADE (Add custom model):
-   
-   # In modular_memory.py:
-   class CustomNERLearning(LearningEngine):
-       def __init__(self):
-           self.model = load_ner_model()
-       # ... implement interface
-   
-   # System automatically uses it alongside existing engines!
-
-
-3. CONTEXT RETRIEVAL UPGRADE (Add graph database):
-   
-   # In modular_memory.py:
-   class Neo4jContextRetriever(ContextRetriever):
-       # Build knowledge graph
-   
-   # Swap in config:
-   memory_config = {'retriever': 'neo4j'}
-
-
-4. FINE-TUNING INTEGRATION:
-   
-   # You already have training data being exported!
-   # When ready:
-   training_data = load_json('training_export_*.json')
-   fine_tune_model(base_model='qwen2.5:14b', data=training_data)
-   
-   # Then use fine-tuned model:
-   assistant = JarvisAssistant(model_name='jarvis-finetuned')
-
-
-Everything is designed to be upgraded piece by piece.
-No need to rewrite the whole system!
-"""

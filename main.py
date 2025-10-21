@@ -23,7 +23,7 @@ def verify_ollama():
         subprocess.run(["ollama", "list"], capture_output=True, check=True)
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Ollama not found. Install from https://ollama.ai")
+        print("❌ Ollama not found. Install from https://ollama.ai")
         return False
 
 
@@ -31,6 +31,7 @@ def print_help():
     """Show available commands"""
     print("""
 Available Commands:
+  news               - Get today's news summary from reputable sources
   stats              - Show detailed memory statistics
   personality        - Show personality development status
   set [trait] [val]  - Adjust personality trait (e.g., 'set humor 50')
@@ -118,7 +119,12 @@ def main():
     """)
     
     # Verify Ollama
+    print("Checking Ollama installation...")
     if not verify_ollama():
+        print("\n❌ Ollama check failed. Please make sure Ollama is installed and running.")
+        print("Download from: https://ollama.ai")
+        print("\nAfter installing, run: ollama pull qwen2.5:14b")
+        input("\nPress Enter to exit...")
         return
     
     # Initialize assistant

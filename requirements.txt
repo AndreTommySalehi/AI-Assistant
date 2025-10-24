@@ -1,3 +1,4 @@
+# Core AI requirements
 ollama
 requests
 beautifulsoup4
@@ -6,3 +7,8 @@ transformers
 torch
 accelerate
 sentencepiece
+
+# Voice requirements
+SpeechRecognition>=3.10.0
+pyttsx3>=2.90
+pyaudio>=0.2.13

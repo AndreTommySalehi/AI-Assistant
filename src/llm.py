@@ -11,9 +11,9 @@ import requests
 class LLMHandler:
     """Handles communication with multiple LLM providers"""
     
-    def __init__(self, model_name=None):
+    def __init__(self, model_name=None, enable_ab_testing=None):
         self.primary_model = model_name or config.DEFAULT_MODEL
-        self.use_ab_testing = config.ENABLE_AB_TESTING
+        self.use_ab_testing = enable_ab_testing if enable_ab_testing is not None else config.ENABLE_AB_TESTING
         self.use_gpt_oss = config.USE_GPT_OSS
         
         # Check if GPT-OSS server is running
@@ -23,14 +23,16 @@ class LLMHandler:
                 response = requests.get("http://localhost:8000/health", timeout=2)
                 if response.status_code == 200:
                     self.gpt_oss_available = True
-                    print("✓ GPT-OSS server connected!")
+                    print("GPT-OSS server connected")
                 else:
-                    print("✗ GPT-OSS server not responding")
-            except Exception as e:
-                print(f"✗ GPT-OSS server not running (start with: transformers serve --model openai/gpt-oss-20b)")
+                    print("GPT-OSS server not responding")
+            except Exception:
                 self.use_gpt_oss = False
         
         self._verify_ollama_model()
+        
+        if self.use_ab_testing:
+            print("A/B testing enabled")
     
     def _verify_ollama_model(self):
         """Verify Ollama model exists"""
@@ -42,10 +44,10 @@ class LLMHandler:
             else:
                 models_list = models_response
             
-            print(f"✓ Using Ollama model: {self.primary_model}")
+            # Silently verify model exists
             
-        except Exception as e:
-            pass  # Silent failure
+        except Exception:
+            pass
     
     def generate(self, prompt, use_search_context=False):
         """Generate response - try GPT-OSS server first, fallback to Ollama"""
@@ -146,7 +148,7 @@ class LLMHandler:
             return f"I'm having trouble connecting to my AI model right now. Please try again."
     
     def _ab_test_generate(self, prompt, use_search_context):
-        """A/B test: compare responses"""
+        """A/B test: compare responses from different sources"""
         responses = []
         system_content = self._get_system_prompt(use_search_context)
         
@@ -160,7 +162,7 @@ class LLMHandler:
                 'confidence': confidence,
                 'provider': 'Ollama'
             })
-        except Exception as e:
+        except Exception:
             pass
         
         # Model 2: GPT-OSS (if available)
@@ -174,15 +176,27 @@ class LLMHandler:
                     'confidence': confidence,
                     'provider': 'GPT-OSS'
                 })
-            except Exception as e:
+            except Exception:
                 pass
         
         # Select best response
         if not responses:
             return "I'm having trouble generating a response. Please try again."
         
+        if len(responses) == 1:
+            return responses[0]['response']
+        
+        # Compare confidence scores
         best = max(responses, key=lambda x: x['confidence'])
-        return best['response']
+        
+        # Only use best if confidence difference is significant
+        confidence_diff = best['confidence'] - min(r['confidence'] for r in responses)
+        if confidence_diff > config.CONFIDENCE_THRESHOLD:
+            print(f"[A/B] Using {best['model']} (confidence: {best['confidence']})")
+            return best['response']
+        
+        # If similar confidence, use primary
+        return responses[0]['response']
     
     def _calculate_confidence(self, response, prompt):
         """Calculate confidence score 0-100"""

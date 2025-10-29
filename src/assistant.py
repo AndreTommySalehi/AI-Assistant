@@ -1,6 +1,6 @@
 """
 Jarvis Assistant - Modular architecture
-Easy to upgrade components without breaking things!
+Fixed: News triggers and two-step news system
 """
 
 from datetime import datetime
@@ -13,56 +13,48 @@ from .modular_memory import ModularMemorySystem
 try:
     from .personality import PersonalityEngine
     PERSONALITY_AVAILABLE = True
-    print("  - Personality system: enabled")
-except ImportError as e:
+except ImportError:
     PERSONALITY_AVAILABLE = False
     PersonalityEngine = None
-    print(f"  - Personality system: disabled (personality.py not found)")
 
 # Try to import news aggregator
 try:
     from .news_aggregator import NewsAggregator
     NEWS_AVAILABLE = True
-    print("  - News aggregator: enabled")
-except ImportError as e:
+except ImportError:
     NEWS_AVAILABLE = False
     NewsAggregator = None
-    print(f"  - News aggregator: disabled")
 
 
 class JarvisAssistant:
-    """Main assistant with modular, upgradeable memory"""
-    
-    def __init__(self, model_name=None, memory_config=None, debug=False):
+
+    def __init__(self, model_name=None, memory_config=None, debug=False, enable_ab_testing=True):
         # Initialize LLM first
-        self.llm = LLMHandler(model_name)
+        self.llm = LLMHandler(model_name, enable_ab_testing=enable_ab_testing)
         
         # Initialize web search
         try:
             self.search = WebSearch()
-        except Exception as e:
+        except Exception:
             self.search = None
-            print("⚠️ Search unavailable")
         
-        # Initialize MODULAR memory system
+        # Initialize memory system
         self.memory = ModularMemorySystem(
             llm_handler=self.llm,
             config=memory_config or {}
         )
         
-        # Initialize PERSONALITY system (if available)
+        # Initialize personality system (if available)
         if PERSONALITY_AVAILABLE:
             self.personality = PersonalityEngine()
         else:
             self.personality = None
-            print("  Note: Personality system disabled (create src/personality.py to enable)")
         
-        # Initialize NEWS aggregator (if available)
+        # Initialize news aggregator (if available)
         if NEWS_AVAILABLE:
             self.news = NewsAggregator()
         else:
             self.news = None
-            print("  Note: News aggregator disabled")
         
         # Search cache (simple dict for now)
         self.search_cache = {}
@@ -82,11 +74,25 @@ class JarvisAssistant:
         try:
             self.message_count += 1
             
-            # Check for news request
-            news_keywords = ['news', 'today', 'daily recap', 'what happened', "what's happening", 
-                           'news summary', 'daily summary', 'current events']
-            if any(keyword in user_input.lower() for keyword in news_keywords) and self.news:
-                return self._handle_news_request(user_input)
+            # More specific news triggers
+            news_keywords = [
+                'news', 'daily recap', 'daily summary', 'daily briefing',
+                'headlines', 'top stories', "what's happening today",
+                'current events', 'news summary', 'give me the news',
+                'tell me the news', 'today\'s news'
+            ]
+            
+            # Check for exact news request (not just containing "today")
+            user_lower = user_input.lower().strip()
+            is_news_request = any(keyword in user_lower for keyword in news_keywords)
+            
+            # Check for "more" command (news deep-dive)
+            if user_lower.startswith('more ') and self.news:
+                return self._handle_news_deepdive(user_input)
+            
+            # Handle news request
+            if is_news_request and self.news:
+                return self._handle_news_request(user_input, headlines_only=True)
             
             # Evolve personality based on this interaction (if available)
             if self.personality:
@@ -104,9 +110,6 @@ class JarvisAssistant:
                 response = self._handle_search_query(user_input)
             else:
                 response = self._handle_general_query(user_input)
-            
-            # NOTE: Personality adjustments are now handled in the system prompt
-            # No need for post-processing the response anymore!
             
             # Add assistant response to history
             self.conversation_history.append({
@@ -154,7 +157,7 @@ class JarvisAssistant:
         if self.personality:
             personality_prompt = self.personality.get_system_prompt_modifier()
         else:
-            personality_prompt = "You are Jarvis, a professional AI assistant. Always address the user as 'sir' or 'ma'am'. The current date is October 20, 2025."
+            personality_prompt = "You are Jarvis, a professional AI assistant. Always address the user as 'sir' or 'ma'am'. The current date is October 28, 2025."
         
         # Build enhanced prompt
         if context:
@@ -218,101 +221,114 @@ Instructions: Answer the user's question using the search results above. Be conv
         
         return response
     
-    def _handle_news_request(self, user_input):
-        """Handle news/daily summary requests"""
-        print("\n", end="", flush=True)
+    def _handle_news_deepdive(self, user_input):
+        """Handle 'more [topic]' command for news details"""
+        # Extract topic identifier (number or keywords)
+        more_text = user_input.lower().replace('more', '').strip()
         
-        # Fetch news
-        summary = self.news.get_daily_summary()
+        if not more_text:
+            return "Please specify which story you'd like more details on. For example: 'more 3' or 'more ChatGPT suicide'."
         
-        # Format for display
-        formatted = self.news.format_summary(summary)
-        print(formatted)
+        # Get topic details
+        details = self.news.get_topic_details(more_text)
         
-        # Also get LLM summary
-        news_text = self.news.get_summary_for_llm(summary)
+        if not details:
+            return f"I couldn't find that topic. Please try a different number or keywords from the news list."
         
-        # Get personality prompt
+        # Format and return details
+        formatted = self.news.format_topic_details(details)
+        
+        # Get LLM to summarize the detailed articles
         if self.personality:
             personality_prompt = self.personality.get_system_prompt_modifier()
         else:
             personality_prompt = "You are JARVIS, an advanced AI assistant."
         
-        # Ask LLM to summarize with structure
+        articles_text = "\n\n".join([
+            f"Article {i+1} ({art['source']}):\n{art['title']}\n{art['description']}"
+            for i, art in enumerate(details['articles'])
+        ])
+        
         prompt = f"""{personality_prompt}
 
-Here are today's top headlines from reputable news sources:
+The user asked for more details about: "{details['headline']}"
 
-{news_text}
+Here are related articles:
 
-User asked: "{user_input}"
+{articles_text}
 
-Create a comprehensive daily briefing organized by category. For EACH category that has news:
+Provide a comprehensive summary (2-3 paragraphs) covering:
+1. What happened
+2. Why it matters
+3. Key implications or context
 
-Format EXACTLY like this:
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-💻 TECHNOLOGY
-
-  • First major tech story here
-    Brief explanation of what happened and why it matters.
-    
-  • Second tech story headline
-    Context and impact in 1-2 sentences.
-    
-  • Third tech story if available
-    What you need to know about it.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📈 BUSINESS & MARKETS
-
-  • Stock market story
-    What happened in the markets and why.
-    
-  • Major business development
-    Impact on economy or industry.
-    
-  • Other business news
-    Key takeaways.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🌍 GENERAL NEWS
-
-  • Major world event
-    What happened and significance.
-    
-  • Important national story
-    Context and implications.
-    
-  • Other significant news
-    Key points to know.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🔬 SCIENCE
-
-  • Scientific breakthrough
-    Explained in simple terms with impact.
-    
-  • Research findings
-    What was discovered and why it matters.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-CRITICAL FORMATTING RULES:
-- Use the exact divider lines shown above (━━━━━)
-- Add blank line after each bullet point
-- Indent bullets with 2 spaces
-- Keep explanation under bullet, not on same line
-- Skip categories with no news
-- Be clear and informative"""
+Be conversational and informative."""
         
         llm_summary = self.llm.generate(prompt, use_search_context=False)
         
-        return f"\n{llm_summary}"
+        return f"\n{formatted}\n\nSUMMARY:\n{llm_summary}"
+    
+    def _handle_news_request(self, user_input, headlines_only=True):
+        """Handle news/daily summary requests - headlines only by default"""
+        print("\n", end="", flush=True)
+        
+        # Fetch news
+        summary = self.news.get_daily_summary()
+        
+        if headlines_only:
+            # Just show the headlines list
+            formatted = self.news.format_summary(summary, show_numbers=True)
+            print(formatted)
+            
+            # Simple spoken response
+            total_stories = sum(len(summary.get(cat, [])) for cat in ['general', 'tech', 'business', 'science'])
+            
+            if self.personality:
+                personality_prompt = self.personality.get_system_prompt_modifier()
+            else:
+                personality_prompt = "You are JARVIS, an advanced AI assistant."
+            
+            prompt = f"""{personality_prompt}
+
+Today's news summary is ready with {total_stories} stories across technology, business, general news, and science.
+
+Respond briefly (1 sentence) saying the news is ready and they can ask for more details on any story using 'more [number]' or 'more [topic]'.
+
+Keep it conversational and brief."""
+            
+            spoken_response = self.llm.generate(prompt, use_search_context=False)
+            
+            return spoken_response
+        
+        # Full detailed summary (only if specifically requested)
+        else:
+            formatted = self.news.format_summary(summary, show_numbers=True)
+            print(formatted)
+            
+            news_text = self.news.get_summary_for_llm(summary)
+            
+            if self.personality:
+                personality_prompt = self.personality.get_system_prompt_modifier()
+            else:
+                personality_prompt = "You are JARVIS, an advanced AI assistant."
+            
+            prompt = f"""{personality_prompt}
+
+Here are today's top headlines:
+
+{news_text}
+
+Create a comprehensive daily briefing organized by category. For each category that has news:
+
+[Keep the same detailed format as before...]
+
+Critical formatting rules:
+- Keep responses under 5 sentences total
+- Be clear and informative"""
+            
+            llm_summary = self.llm.generate(prompt, use_search_context=False)
+            
+            return f"\n{llm_summary}"
     
     def toggle_learning(self, enabled=None):
         """Turn auto-learning on/off"""
@@ -322,7 +338,7 @@ CRITICAL FORMATTING RULES:
             self.auto_learn = enabled
         
         status = "enabled" if self.auto_learn else "disabled"
-        print(f"🧠 Auto-learning {status}")
+        print(f"Auto-learning {status}")
         return self.auto_learn
     
     def export_for_finetuning(self, filepath=None):

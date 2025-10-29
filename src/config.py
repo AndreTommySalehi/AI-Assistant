@@ -1,20 +1,16 @@
-"""
-Configuration with Qwen 2.5 (Best free local model)
-"""
-
-# GPT-OSS Configuration - DISABLED
-USE_GPT_OSS = False  # Too much hassle with servers
+# GPT-OSS Configuration
+USE_GPT_OSS = False  # Set to True if you have GPT-OSS server running
 GPT_OSS_MODEL = "openai/gpt-oss-20b"
 GPT_OSS_MAX_TOKENS = 512
 GPT_OSS_PRIORITY = False
 
-# Ollama Models - Qwen 2.5 (has 2024 training data!)
-DEFAULT_MODEL = "qwen2.5:14b"  # Upgraded from llama3.1:8b
-SECONDARY_MODEL = None  # Not needed
+# Ollama Models
+DEFAULT_MODEL = "qwen2.5:14b"
+SECONDARY_MODEL = None
 
-# A/B Testing - DISABLED (only using one model)
-ENABLE_AB_TESTING = False
-CONFIDENCE_THRESHOLD = 30
+# A/B Testing - Now enabled by default
+ENABLE_AB_TESTING = True
+CONFIDENCE_THRESHOLD = 30  # Minimum confidence difference to prefer one model
 
 # Search Configuration
 SEARCH_TIMEOUT = 30

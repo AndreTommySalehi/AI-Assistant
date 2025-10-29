@@ -1,5 +1,6 @@
 """
-Jarvis AI Assistant - Main entry point with VOICE MODE
+Jarvis AI Assistant - Main entry point with hybrid voice mode
+Smart voice selection: Fast for quick responses, quality for important ones
 """
 
 import warnings
@@ -14,12 +15,12 @@ import subprocess
 from src.assistant import JarvisAssistant
 
 # Try to import voice system
+VOICE_AVAILABLE = False
 try:
-    from src.voice import VoiceAssistant
+    from src.voice import VoiceAssistant, list_microphones
     VOICE_AVAILABLE = True
 except ImportError:
-    VOICE_AVAILABLE = False
-    print("⚠️  Voice system not available (install: pip install SpeechRecognition pyttsx3 pyaudio)")
+    pass
 
 
 def print_help():
@@ -43,11 +44,10 @@ Available Commands:
     if VOICE_AVAILABLE:
         help_text += """
 Voice Commands:
+  voice on/off       - Toggle voice responses in text mode
   voice mode         - Enter continuous voice interaction mode
   wake word mode     - Always-listening mode (say 'Jarvis' to activate)
-  test voice         - Test voice input and output
-  list voices        - Show available TTS voices
-  set voice [#]      - Change TTS voice (use number from 'list voices')
+  test voice         - Test voice system
 """
     
     print(help_text)
@@ -55,21 +55,22 @@ Voice Commands:
 
 def main():
     print("""
-    ╔═══════════════════════════════════════╗
+    ╔══════════════════════════════════════╗
     ║              JARVIS AI                ║
-    ╚═══════════════════════════════════════╝
+    ╚══════════════════════════════════════╝
     """)
     
     # Check for voice mode flag
     voice_mode_start = '--voice' in sys.argv or '-v' in sys.argv
-    wake_word_mode_start = '--wake' in sys.argv or '-w' in sys.argv
+    wake_word_mode_start = '--wake' in sys.argv or '-w' in sys.argv or len(sys.argv) == 1  # Default to wake word mode
     
     # Verify Ollama
     print("Checking Ollama installation...")
     try:
         subprocess.run(["ollama", "list"], capture_output=True, check=True)
+        print("Ollama found")
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("❌ Ollama not found. Install from https://ollama.ai")
+        print("Error: Ollama not found. Install from https://ollama.ai")
         input("\nPress Enter to exit...")
         return
     
@@ -86,42 +87,60 @@ def main():
         
     except Exception as e:
         print(f"\nFailed to initialize: {e}")
+        import traceback
+        traceback.print_exc()
         return
     
     # Initialize voice assistant if available
     voice_assistant = None
-    voice_available = VOICE_AVAILABLE  # Use the module-level variable
-    if voice_available:
-        try:
-            voice_assistant = VoiceAssistant(assistant, voice_enabled=True)
-            print("✓ Voice system ready!")
-        except Exception as e:
-            print(f"⚠️  Voice system failed: {e}")
-            voice_available = False
+    microphone_index = None
     
-    print("\nMode Options:")
-    print("  [1] Text Mode (type commands)")
     if VOICE_AVAILABLE:
-        print("  [2] Voice Mode (speak naturally)")
-        print("  [3] Wake Word Mode (always listening)")
-    print("\nTips:")
-    print("  - Type 'help' to see all commands")
-    print("  - Watch for [*] when Jarvis learns something new")
+        try:
+            # List available microphones
+            print("\nAvailable microphones:")
+            mic_list = list_microphones()
+            
+            if mic_list:
+                # Look for webcam or default
+                default_index = None
+                for idx, name in mic_list:
+                    if 'webcam' in name.lower() or 'camera' in name.lower():
+                        default_index = idx
+                        print(f"\nUsing microphone: {name}")
+                        break
+                
+                if default_index is None and mic_list:
+                    default_index = mic_list[0][0]
+                    print(f"\nUsing default microphone: {mic_list[0][1]}")
+                
+                microphone_index = default_index
+            
+            voice_assistant = VoiceAssistant(
+                assistant, 
+                voice_enabled=True, 
+                voice_mode="hybrid",
+                microphone_index=microphone_index
+            )
+        except Exception as e:
+            print(f"Warning: Voice system failed to initialize: {e}")
+            print("Voice features will be disabled")
+            voice_assistant = None
+    else:
+        print("\nVoice system not available - text mode only")
     
-    # Auto-start voice mode if flag present
-    if VOICE_AVAILABLE and voice_mode_start:
-        print("\n🎤 Starting in Voice Mode...")
-        time.sleep(1)
-        voice_assistant.voice_chat_loop()
-        assistant.shutdown()
-        return
-    elif VOICE_AVAILABLE and wake_word_mode_start:
-        print("\n🎤 Starting in Wake Word Mode...")
+    
+    if voice_assistant:
+        print("\nVoice mode available.")
+        print("Starting wake word mode...")
+        import time
         time.sleep(1)
         voice_assistant.wake_word_mode()
         assistant.shutdown()
         return
     
+    # Only show text mode prompt if no voice
+    print("\nType 'help' for commands.")
     print("\n" + "-" * 60)
     
     # Main conversation loop
@@ -144,20 +163,41 @@ def main():
                 print_help()
                 continue
             
+            # Voice toggle commands
+            if user_input.lower() == 'voice on':
+                if voice_assistant:
+                    voice_assistant.voice_enabled = True
+                    print("Voice responses enabled (hybrid mode)")
+                    if voice_assistant.voice:
+                        voice_assistant.voice.speak("Voice responses enabled, sir.", wait=True)
+                else:
+                    print("Voice system not available")
+                continue
+            
+            if user_input.lower() == 'voice off':
+                if voice_assistant:
+                    if voice_assistant.voice:
+                        voice_assistant.voice.speak("Voice responses disabled, sir.", wait=True)
+                    voice_assistant.voice_enabled = False
+                    print("Voice responses disabled")
+                else:
+                    print("Voice system not available")
+                continue
+            
             # Voice mode commands
-            if VOICE_AVAILABLE:
+            if voice_assistant:
                 if user_input.lower() == 'voice mode':
-                    print("\n🎤 Entering Voice Mode...")
+                    print("\nEntering Voice Mode...")
                     print("Tip: Say 'exit' or 'goodbye' to return to text mode\n")
                     voice_assistant.voice_chat_loop()
-                    print("\n✓ Returned to text mode")
+                    print("\nReturned to text mode")
                     continue
                 
                 if user_input.lower() in ['wake word mode', 'wake mode']:
-                    print("\n🎤 Entering Wake Word Mode...")
+                    print("\nEntering Wake Word Mode...")
                     print("Tip: Say 'Jarvis' followed by your command\n")
                     voice_assistant.wake_word_mode()
-                    print("\n✓ Returned to text mode")
+                    print("\nReturned to text mode")
                     continue
                 
                 if user_input.lower() == 'test voice':
@@ -166,21 +206,8 @@ def main():
                     print("Now say something:")
                     text = voice_assistant.voice.listen(timeout=5)
                     if text:
-                        print(f"✓ Recognized: {text}")
-                        voice_assistant.voice.speak(f"You said: {text}", wait=True)
-                    continue
-                
-                if user_input.lower() == 'list voices':
-                    voice_assistant.voice.list_available_voices()
-                    continue
-                
-                if user_input.lower().startswith('set voice '):
-                    try:
-                        voice_num = int(user_input.split()[2])
-                        if voice_assistant.voice.set_voice_by_number(voice_num):
-                            voice_assistant.voice.speak("Voice changed successfully.", wait=True)
-                    except:
-                        print("Usage: set voice [number]")
+                            print(f"Recognized: {text}")
+                            voice_assistant.voice.speak(f"You said: {text}", wait=True)
                     continue
             
             # Stats command
@@ -242,9 +269,9 @@ def main():
             if user_input.lower() == 'export':
                 try:
                     filepath = assistant.export_for_finetuning()
-                    print(f"\n✓ Training data exported to: {filepath}")
+                    print(f"\nTraining data exported to: {filepath}")
                 except Exception as e:
-                    print(f"\n❌ Export failed: {e}")
+                    print(f"\nExport failed: {e}")
                 continue
             
             # Learn toggle command
@@ -274,13 +301,18 @@ def main():
             # Clear conversation command
             if user_input.lower() == 'clear':
                 assistant.conversation_history = []
-                print("✓ Conversation history cleared (memories preserved)")
+                print("Conversation history cleared (memories preserved)")
                 continue
             
             # Normal chat
             print("Jarvis: ", end="", flush=True)
             response = assistant.chat(user_input)
             print(response)
+            
+            # Hybrid voice: Pass user query for smart voice selection
+            if voice_assistant and voice_assistant.voice_enabled:
+                voice_assistant.speak_response(response, user_query=user_input)
+            
             print("\n" + "-" * 60)
             
         except KeyboardInterrupt:
@@ -296,5 +328,4 @@ def main():
 
 
 if __name__ == "__main__":
-    import time
     main()

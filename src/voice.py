@@ -1,8 +1,9 @@
 """
-Voice Assistant - Inverted hybrid mode
+Voice Assistant - Inverted hybrid mode with continuous wake word detection
 Smart approach:
 - Short responses: Cloned voice (quick to generate, high quality)
 - Long responses: System voice (instant, avoids 30+ second wait)
+- Continuous listening: Processes commands immediately after "Jarvis"
 """
 
 import os
@@ -93,7 +94,7 @@ class JarvisVoice:
             self.recognizer = sr.Recognizer()
             self.recognizer.energy_threshold = 4000
             self.recognizer.dynamic_energy_threshold = True
-            self.recognizer.pause_threshold = 1.0  # Seconds of silence to mark end of phrase
+            self.recognizer.pause_threshold = 1.5  # Longer pause before stopping (was 0.8)
     
     def _init_cloned_voice(self):
         """Initialize Coqui TTS for short, high-quality responses"""
@@ -137,7 +138,7 @@ class JarvisVoice:
                     break
             
             # Optimized settings for clarity
-            self.pyttsx3_engine.setProperty('rate', 175)  # Balanced speed
+            self.pyttsx3_engine.setProperty('rate', 175)
             self.pyttsx3_engine.setProperty('volume', 0.9)
             
             return True
@@ -148,16 +149,13 @@ class JarvisVoice:
     def should_use_cloned_voice(self, text):
         """Decide: short = cloned (quality), long = system (instant)"""
         if not self.hybrid_mode:
-            return True  # Always use cloned if not hybrid
+            return True
         
-        # Count words
         word_count = len(text.split())
         
-        # Short responses: use high-quality cloned voice
         if word_count <= self.cloned_word_limit:
             return True
         
-        # Long responses: use fast system voice (avoid long waits)
         return False
     
     def speak(self, text, wait=True, use_cache=True, force_mode=None):
@@ -165,17 +163,14 @@ class JarvisVoice:
         if not text:
             return
         
-        # Allow manual override
         if force_mode == "cloned":
             use_cloned = True
         elif force_mode == "system":
             use_cloned = False
         else:
-            # Automatic decision
             use_cloned = self.should_use_cloned_voice(text)
         
         if use_cloned and self.tts:
-            # High-quality cloned voice (short responses only)
             print("(quality) ", end="", flush=True)
             try:
                 self._speak_cloned_fast(text, wait, use_cache)
@@ -183,7 +178,6 @@ class JarvisVoice:
                 if self.pyttsx3_engine:
                     self._speak_system(text, wait)
         elif self.pyttsx3_engine:
-            # Fast system voice (long responses)
             print("(fast) ", end="", flush=True)
             self._speak_system(text, wait)
     
@@ -191,19 +185,17 @@ class JarvisVoice:
         """High-quality cloned voice generation"""
         import hashlib
         
-        # Check cache
         text_hash = hashlib.md5(text.encode()).hexdigest()
         cached_file = os.path.join(self.cache_dir, f"{text_hash}.wav")
         
         if use_cache and os.path.exists(cached_file):
             if AUDIO_PLAYBACK:
                 data, samplerate = sf.read(cached_file)
-                sd.play(data, int(samplerate * 0.95))  # Slightly slower = deeper
+                sd.play(data, int(samplerate * 0.95))
                 if wait:
                     sd.wait()
             return
         
-        # Generate new audio
         output_file = "./temp_speech.wav"
         
         try:
@@ -227,7 +219,6 @@ class JarvisVoice:
                 data, samplerate = sf.read(output_file)
                 sd.play(data, int(samplerate * 0.95))
                 
-                # Cache in background
                 threading.Thread(target=self._cache_audio, args=(cached_file, data, samplerate), daemon=True).start()
                 
                 if wait:
@@ -255,15 +246,10 @@ class JarvisVoice:
             self.pyttsx3_engine.runAndWait()
     
     def speak_streaming(self, text):
-        """
-        Stream response intelligently:
-        - Short sentences: use cloned (quality)
-        - Long sentences: use system (speed)
-        """
+        """Stream response intelligently"""
         if not text:
             return
         
-        # Split into sentences
         sentences = re.split(r'(?<=[.!?])\s+', text)
         
         for i, sentence in enumerate(sentences):
@@ -271,9 +257,63 @@ class JarvisVoice:
                 continue
             
             is_last = (i == len(sentences) - 1)
-            
-            # Each sentence decides its own voice
             self.speak(sentence.strip(), wait=is_last, use_cache=True)
+    
+    def listen_continuous(self, timeout=None):
+        """Continuously listen and return full phrase"""
+        if not self.recognizer:
+            return None
+        
+        try:
+            mic_kwargs = {}
+            if self.microphone_index is not None:
+                mic_kwargs['device_index'] = self.microphone_index
+                
+            with sr.Microphone(**mic_kwargs) as source:
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.3)
+                
+                audio = self.recognizer.listen(
+                    source,
+                    timeout=timeout,
+                    phrase_time_limit=None
+                )
+                
+                try:
+                    text = self.recognizer.recognize_google(audio)
+                    return text.lower()
+                except sr.UnknownValueError:
+                    return None
+                
+        except sr.WaitTimeoutError:
+            return None
+        except Exception:
+            return None
+    
+    def extract_command_after_wake_word(self, text, wake_word="jarvis"):
+        """Extract command from text containing wake word"""
+        if not text:
+            return None
+        
+        text_lower = text.lower()
+        wake_word_lower = wake_word.lower()
+        
+        if wake_word_lower not in text_lower:
+            return None
+        
+        # Find position of wake word and extract everything after
+        wake_word_index = text_lower.find(wake_word_lower)
+        command_start = wake_word_index + len(wake_word_lower)
+        
+        # Get the command part
+        command = text[command_start:].strip()
+        
+        # Remove common filler words at start
+        filler_words = ['please', 'can you', 'could you', 'would you']
+        for filler in filler_words:
+            if command.lower().startswith(filler):
+                command = command[len(filler):].strip()
+        
+        return command if command else None
     
     def listen(self, timeout=5, phrase_limit=None):
         """Listen for speech input"""
@@ -315,72 +355,6 @@ class JarvisVoice:
             print(f"(error: {e})")
             return None
     
-    def listen_for_wake_word(self, timeout=30):
-        """Listen specifically for wake word with longer timeout"""
-        if not self.recognizer:
-            return None
-        
-        try:
-            mic_kwargs = {}
-            if self.microphone_index is not None:
-                mic_kwargs['device_index'] = self.microphone_index
-                
-            with sr.Microphone(**mic_kwargs) as source:
-                self.recognizer.adjust_for_ambient_noise(source, duration=0.3)
-                
-                audio = self.recognizer.listen(
-                    source,
-                    timeout=timeout,
-                    phrase_time_limit=3  # Wake word should be short
-                )
-                
-                try:
-                    text = self.recognizer.recognize_google(audio)
-                    return text.lower()
-                except sr.UnknownValueError:
-                    return None
-                
-        except sr.WaitTimeoutError:
-            return None
-        except Exception:
-            return None
-    
-    def listen_after_wake_word(self, timeout=10):
-        """Listen for command after wake word with silence detection"""
-        if not self.recognizer:
-            return None
-        
-        try:
-            mic_kwargs = {}
-            if self.microphone_index is not None:
-                mic_kwargs['device_index'] = self.microphone_index
-                
-            with sr.Microphone(**mic_kwargs) as source:
-                print("Listening for command...", end=" ", flush=True)
-                
-                # Don't adjust for noise since we just did
-                audio = self.recognizer.listen(
-                    source,
-                    timeout=timeout,
-                    phrase_time_limit=None  # No limit, wait for silence
-                )
-                
-                print("Processing...", end=" ", flush=True)
-                
-                text = self.recognizer.recognize_google(audio)
-                print(f"Done\nYou: {text}")
-                return text
-                
-        except sr.WaitTimeoutError:
-            print("(timeout)")
-            return None
-        except sr.UnknownValueError:
-            print("(couldn't understand)")
-            return None
-        except Exception as e:
-            print(f"(error: {e})")
-            return None
-    
     def clear_cache(self):
         """Clear voice cache"""
         try:
@@ -406,7 +380,7 @@ class JarvisVoice:
 
 
 class VoiceAssistant:
-    """Voice wrapper with inverted hybrid intelligence"""
+    """Voice wrapper with continuous wake word detection"""
     
     def __init__(self, jarvis_assistant, voice_enabled=True, voice_mode="hybrid", microphone_index=None):
         self.assistant = jarvis_assistant
@@ -432,7 +406,6 @@ class VoiceAssistant:
             return
         
         try:
-            # Stream sentence-by-sentence with automatic voice selection
             self.voice.speak_streaming(text)
                 
         except Exception as e:
@@ -463,43 +436,55 @@ class VoiceAssistant:
             self.speak_response(response, user_input)
     
     def wake_word_mode(self):
-        """Always-listening mode with wake word detection"""
+        """Continuous listening mode - processes commands immediately after wake word"""
         if not self.voice_enabled or not self.voice:
             print("Voice system not available")
             return
         
-        self.voice.speak("Wake word mode activated. Say 'Jarvis' to begin.", wait=True)
-        print("\nListening for wake word 'Jarvis'... (Press Ctrl+C to exit)")
+        self.voice.speak("Continuous listening activated. I'm ready, sir.", wait=True)
+        print("\nListening continuously... Say 'Jarvis' followed by your command")
+        print("(Press Ctrl+C to exit)\n")
         
         while True:
             try:
-                # Continuously listen for wake word
-                heard_text = self.voice.listen_for_wake_word(timeout=30)
+                # Continuously listen for any speech
+                heard_text = self.voice.listen_continuous(timeout=None)
                 
-                if heard_text and self.wake_word in heard_text:
-                    print(f"\nWake word detected!")
-                    self.voice.speak("Yes, sir?", wait=True)
-                    
-                    # Now listen for the actual command with extended silence detection
-                    command = self.voice.listen_after_wake_word(timeout=10)
+                if not heard_text:
+                    continue
+                
+                # Check if wake word is present
+                if self.wake_word in heard_text:
+                    # Extract the command that came after the wake word
+                    command = self.voice.extract_command_after_wake_word(heard_text, self.wake_word)
                     
                     if command:
+                        print(f"\nDetected: {heard_text}")
+                        print(f"Command: {command}")
+                        
+                        # Check for exit commands
                         if any(word in command.lower() for word in ['exit', 'goodbye', 'quit', 'stop', 'deactivate']):
-                            self.voice.speak("Wake word mode deactivated.", wait=True)
+                            self.voice.speak("Continuous listening deactivated.", wait=True)
                             break
                         
+                        # Process the command immediately
                         print("\nJarvis: ", end="", flush=True)
                         response = self.assistant.chat(command)
                         print(response)
                         self.speak_response(response, command)
                         
-                        print("\nListening for wake word 'Jarvis'...")
+                        print("\nListening...")
                     else:
-                        print("Listening for wake word 'Jarvis'...")
+                        # Wake word detected but no command followed
+                        print(f"\nHeard: {heard_text}")
+                        print("(No command detected after wake word)")
                         
             except KeyboardInterrupt:
-                print("\n\nWake word mode stopped.")
+                print("\n\nContinuous listening stopped.")
                 break
+            except Exception as e:
+                print(f"\nError in wake word mode: {e}")
+                continue
     
     def shutdown(self):
         """Cleanup"""

@@ -37,8 +37,12 @@ Available Commands:
   learn on/off       - Toggle auto-learning on or off
   remember [msg]     - Manually remember something
   clear              - Clear conversation history (memory preserved)
+  list apps          - Show all apps Jarvis can open
   help               - Show this message
   exit/quit          - Save and quit
+
+App Launcher:
+  open [app]         - Open an application (e.g., 'open google', 'open vscode')
 """
     
     if VOICE_AVAILABLE:
@@ -161,6 +165,13 @@ def main():
             # Help command
             if user_input.lower() == 'help':
                 print_help()
+                continue
+            
+            # List apps command
+            if user_input.lower() == 'list apps':
+                print("\nAvailable Applications:")
+                for app_info in assistant.app_launcher.list_apps():
+                    print(f"  {app_info}")
                 continue
             
             # Voice toggle commands

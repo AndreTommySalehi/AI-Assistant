@@ -1,6 +1,7 @@
 """
 Unlimited web search - No API keys, No rate limits
 Uses multiple search methods with fallbacks
+Enhanced with better parsing and error handling
 """
 
 import warnings
@@ -12,6 +13,7 @@ import requests
 from bs4 import BeautifulSoup
 import random
 import urllib.parse
+import json
 
 
 class WebSearch:
@@ -25,10 +27,10 @@ class WebSearch:
         
         # Rotating user agents to avoid detection
         self.user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
         ]
     
     def needs_search(self, query):
@@ -45,48 +47,98 @@ class WebSearch:
             'Accept-Encoding': 'gzip, deflate',
             'DNT': '1',
             'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none'
         }
     
     def search(self, query):
         """Try multiple search methods until one works"""
         
-        # Method 1: Google scraping (works most of the time)
-        try:
-            result = self._search_google(query)
-            if result and "error" not in result.lower():
-                return result
-        except:
-            pass
-        
-        # Method 2: Bing scraping (backup)
-        try:
-            result = self._search_bing(query)
-            if result and "error" not in result.lower():
-                return result
-        except:
-            pass
-        
-        # Method 3: Yahoo scraping (backup)
-        try:
-            result = self._search_yahoo(query)
-            if result and "error" not in result.lower():
-                return result
-        except:
-            pass
-        
-        # Method 4: DuckDuckGo HTML scraping (last resort)
+        # Method 1: DuckDuckGo HTML (most reliable, no blocking)
         try:
             result = self._search_ddg_html(query)
-            if result and "error" not in result.lower():
+            if result and "error" not in result.lower() and len(result) > 50:
                 return result
-        except:
+        except Exception as e:
             pass
         
-        return "All search methods failed. Please try again."
+        # Method 2: Google scraping
+        try:
+            result = self._search_google(query)
+            if result and "error" not in result.lower() and len(result) > 50:
+                return result
+        except Exception as e:
+            pass
+        
+        # Method 3: Bing scraping
+        try:
+            result = self._search_bing(query)
+            if result and "error" not in result.lower() and len(result) > 50:
+                return result
+        except Exception as e:
+            pass
+        
+        # Method 4: Brave Search (good for crypto/finance)
+        try:
+            result = self._search_brave(query)
+            if result and "error" not in result.lower() and len(result) > 50:
+                return result
+        except Exception as e:
+            pass
+        
+        return "Search temporarily unavailable. Please try again in a moment."
+    
+    def _search_ddg_html(self, query):
+        """Scrape DuckDuckGo HTML (most reliable)"""
+        try:
+            encoded_query = urllib.parse.quote_plus(query)
+            url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+            
+            response = requests.post(
+                url,
+                data={'q': query, 'b': '', 'kl': 'us-en'},
+                headers=self._get_headers(),
+                timeout=self.timeout
+            )
+            
+            if response.status_code != 200:
+                return None
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            results = []
+            for result in soup.find_all('div', class_='result'):
+                # Title and URL
+                title_elem = result.find('a', class_='result__a')
+                if not title_elem:
+                    continue
+                
+                title = title_elem.get_text(strip=True)
+                url = title_elem.get('href', '')
+                
+                # Snippet
+                snippet_elem = result.find('a', class_='result__snippet')
+                snippet = snippet_elem.get_text(strip=True) if snippet_elem else ''
+                
+                if title and snippet:
+                    results.append({
+                        'title': title,
+                        'url': url,
+                        'snippet': snippet
+                    })
+            
+            if not results:
+                return None
+            
+            return self._format_results(results[:self.max_results], "DuckDuckGo")
+            
+        except Exception as e:
+            return None
     
     def _search_google(self, query):
-        """Scrape Google search results directly"""
+        """Scrape Google search results"""
         try:
             encoded_query = urllib.parse.quote_plus(query)
             url = f"https://www.google.com/search?q={encoded_query}&num={self.max_results}"
@@ -102,22 +154,40 @@ class WebSearch:
             
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Find search result divs
             results = []
-            for g in soup.find_all('div', class_='g'):
+            
+            # Try multiple selector patterns
+            search_divs = soup.find_all('div', class_='g')
+            if not search_divs:
+                search_divs = soup.find_all('div', attrs={'data-sokoban-container': True})
+            
+            for g in search_divs:
                 # Title
                 title_elem = g.find('h3')
-                title = title_elem.text if title_elem else 'No title'
+                if not title_elem:
+                    continue
+                title = title_elem.get_text(strip=True)
                 
                 # URL
                 link_elem = g.find('a')
-                url = link_elem['href'] if link_elem and 'href' in link_elem.attrs else ''
+                url = link_elem.get('href', '') if link_elem else ''
                 
-                # Snippet
-                snippet_elem = g.find('div', class_=['VwiC3b', 'yXK7lf'])
-                snippet = snippet_elem.text if snippet_elem else 'No description'
+                # Snippet - try multiple patterns
+                snippet = ''
+                snippet_elem = g.find('div', class_=['VwiC3b', 'yXK7lf', 'lEBKkf'])
+                if not snippet_elem:
+                    snippet_elem = g.find('span', class_=['aCOpRe', 'st'])
+                if not snippet_elem:
+                    # Look for any div with text content
+                    for div in g.find_all('div'):
+                        text = div.get_text(strip=True)
+                        if len(text) > 50 and title not in text:
+                            snippet = text
+                            break
+                else:
+                    snippet = snippet_elem.get_text(strip=True)
                 
-                if title and url:
+                if title and snippet and len(snippet) > 20:
                     results.append({
                         'title': title,
                         'url': url,
@@ -160,18 +230,23 @@ class WebSearch:
                 if not link:
                     continue
                 
-                title = link.text
+                title = link.get_text(strip=True)
                 url = link.get('href', '')
                 
                 # Snippet
-                snippet_elem = li.find('p') or li.find('div', class_='b_caption')
-                snippet = snippet_elem.text if snippet_elem else 'No description'
+                snippet = ''
+                snippet_elem = li.find('p')
+                if not snippet_elem:
+                    snippet_elem = li.find('div', class_='b_caption')
+                if snippet_elem:
+                    snippet = snippet_elem.get_text(strip=True)
                 
-                results.append({
-                    'title': title,
-                    'url': url,
-                    'snippet': snippet
-                })
+                if title and snippet and len(snippet) > 20:
+                    results.append({
+                        'title': title,
+                        'url': url,
+                        'snippet': snippet
+                    })
             
             if not results:
                 return None
@@ -181,11 +256,11 @@ class WebSearch:
         except Exception as e:
             return None
     
-    def _search_yahoo(self, query):
-        """Scrape Yahoo search results"""
+    def _search_brave(self, query):
+        """Scrape Brave Search (good for crypto)"""
         try:
             encoded_query = urllib.parse.quote_plus(query)
-            url = f"https://search.yahoo.com/search?p={encoded_query}&n={self.max_results}"
+            url = f"https://search.brave.com/search?q={encoded_query}"
             
             response = requests.get(
                 url,
@@ -199,94 +274,66 @@ class WebSearch:
             soup = BeautifulSoup(response.text, 'html.parser')
             
             results = []
-            for div in soup.find_all('div', class_='dd'):
-                # Title and URL
-                title_elem = div.find('h3')
+            
+            # Brave uses different selectors
+            for result_div in soup.find_all('div', class_=['snippet', 'fdb']):
+                # Title
+                title_elem = result_div.find(['h2', 'h3', 'a'])
                 if not title_elem:
                     continue
+                title = title_elem.get_text(strip=True)
                 
-                link = title_elem.find('a')
-                if not link:
-                    continue
-                
-                title = link.text
-                url = link.get('href', '')
+                # URL
+                link_elem = result_div.find('a')
+                url = link_elem.get('href', '') if link_elem else ''
                 
                 # Snippet
-                snippet_elem = div.find('p', class_='fz-ms')
-                snippet = snippet_elem.text if snippet_elem else 'No description'
+                snippet = ''
+                snippet_elem = result_div.find('p', class_='snippet-description')
+                if not snippet_elem:
+                    for p in result_div.find_all('p'):
+                        text = p.get_text(strip=True)
+                        if len(text) > 20:
+                            snippet = text
+                            break
+                else:
+                    snippet = snippet_elem.get_text(strip=True)
                 
-                results.append({
-                    'title': title,
-                    'url': url,
-                    'snippet': snippet
-                })
+                if title and snippet and len(snippet) > 20:
+                    results.append({
+                        'title': title,
+                        'url': url,
+                        'snippet': snippet
+                    })
             
             if not results:
                 return None
             
-            return self._format_results(results[:self.max_results], "Yahoo")
-            
-        except Exception as e:
-            return None
-    
-    def _search_ddg_html(self, query):
-        """Scrape DuckDuckGo HTML (no JavaScript needed)"""
-        try:
-            encoded_query = urllib.parse.quote_plus(query)
-            url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
-            
-            response = requests.post(
-                url,
-                data={'q': query, 'b': '', 'kl': 'us-en'},
-                headers=self._get_headers(),
-                timeout=self.timeout
-            )
-            
-            if response.status_code != 200:
-                return None
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            results = []
-            for result in soup.find_all('div', class_='result'):
-                # Title and URL
-                title_elem = result.find('a', class_='result__a')
-                if not title_elem:
-                    continue
-                
-                title = title_elem.text
-                url = title_elem.get('href', '')
-                
-                # Snippet
-                snippet_elem = result.find('a', class_='result__snippet')
-                snippet = snippet_elem.text if snippet_elem else 'No description'
-                
-                results.append({
-                    'title': title,
-                    'url': url,
-                    'snippet': snippet
-                })
-            
-            if not results:
-                return None
-            
-            return self._format_results(results[:self.max_results], "DuckDuckGo")
+            return self._format_results(results[:self.max_results], "Brave")
             
         except Exception as e:
             return None
     
     def _format_results(self, results, source):
         """Format search results - clean and concise for LLM processing"""
+        if not results:
+            return None
+        
         formatted = []
         
         for i, result in enumerate(results, 1):
             title = result.get('title', 'No title')
             snippet = result.get('snippet', 'No description')
-            url = result.get('url', '')
             
-            # Just concatenate the info cleanly
-            formatted.append(f"{title}. {snippet}")
+            # Clean up the snippet
+            snippet = snippet.replace('\n', ' ').strip()
+            
+            # For crypto queries, prioritize results with numbers/prices
+            if any(word in title.lower() or word in snippet.lower() 
+                   for word in ['bitcoin', 'btc', 'crypto', 'price', '$']):
+                formatted.insert(0, f"{title}. {snippet}")
+            else:
+                formatted.append(f"{title}. {snippet}")
         
         return "\n\n".join(formatted)
     
@@ -295,15 +342,14 @@ class WebSearch:
         for attempt in range(max_retries):
             try:
                 result = self.search(query)
-                if result and "error" not in result.lower():
+                if result and "error" not in result.lower() and len(result) > 50:
                     return result
                 
                 if attempt < max_retries - 1:
-                    # Random delay between retries (1-3 seconds)
-                    time.sleep(random.uniform(1, 3))
+                    time.sleep(random.uniform(1, 2))
             except Exception as e:
                 if attempt == max_retries - 1:
-                    return f"Search failed after {max_retries} attempts: {str(e)}"
-                time.sleep(random.uniform(1, 3))
+                    return f"Search failed after {max_retries} attempts."
+                time.sleep(random.uniform(1, 2))
         
         return "Search unavailable after multiple attempts."

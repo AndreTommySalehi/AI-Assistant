@@ -1,6 +1,7 @@
 """
 Jarvis Assistant - Modular architecture
 Fixed: News triggers and two-step news system
+Added: Calendar integration (removed email)
 """
 
 from datetime import datetime
@@ -8,6 +9,8 @@ import re
 from .llm import LLMHandler
 from .search import WebSearch
 from .modular_memory import ModularMemorySystem
+from .app_launcher import AppLauncher
+from .calendar_handler import CalendarHandler
 
 # Try to import personality - optional
 try:
@@ -37,6 +40,15 @@ class JarvisAssistant:
             self.search = WebSearch()
         except Exception:
             self.search = None
+        
+        # Initialize app launcher
+        print("Initializing app launcher...")
+        self.app_launcher = AppLauncher()
+        print(f"App launcher ready with {len(self.app_launcher.apps)} apps")
+        
+        # Initialize calendar manager
+        print("Initializing calendar...")
+        self.calendar = CalendarHandler()
         
         # Initialize memory system
         self.memory = ModularMemorySystem(
@@ -73,6 +85,29 @@ class JarvisAssistant:
         """Process user input and return response"""
         try:
             self.message_count += 1
+            
+            # Check for app launch commands FIRST
+            print(f"[DEBUG] Input: '{user_input}'")
+            if self.app_launcher.can_handle(user_input):
+                print("[DEBUG] App launcher can handle this")
+                app_name = self.app_launcher.extract_app_name(user_input)
+                print(f"[DEBUG] Extracted app: {app_name}")
+                if app_name:
+                    success, message = self.app_launcher.open_app(app_name)
+                    if success:
+                        return f"Opening {app_name}, sir."
+                    else:
+                        return f"I couldn't open {app_name}, sir. {message}"
+                else:
+                    return "I'm not sure which app you want me to open, sir."
+            
+            # Check for calendar commands
+            if self.calendar.can_handle(user_input):
+                print("[DEBUG] Calendar can handle this")
+                success, message = self.calendar.handle_command(user_input)
+                return message
+            
+            print("[DEBUG] Not an app/calendar command, continuing normal processing")
             
             # More specific news triggers
             news_keywords = [
@@ -157,7 +192,7 @@ class JarvisAssistant:
         if self.personality:
             personality_prompt = self.personality.get_system_prompt_modifier()
         else:
-            personality_prompt = "You are Jarvis, a professional AI assistant. Always address the user as 'sir' or 'ma'am'. The current date is October 28, 2025."
+            personality_prompt = "You are Jarvis, a professional AI assistant. Always address the user as 'sir' or 'ma'am'. The current date is October 30, 2025."
         
         # Build enhanced prompt
         if context:
@@ -227,7 +262,7 @@ Instructions: Answer the user's question using the search results above. Be conv
         more_text = user_input.lower().replace('more', '').strip()
         
         if not more_text:
-            return "Please specify which story you'd like more details on. For example: 'more 3' or 'more ChatGPT suicide'."
+            return "Please specify which story you'd like more details on. For example: 'more 3' or 'more bitcoin'."
         
         # Get topic details
         details = self.news.get_topic_details(more_text)
@@ -318,13 +353,7 @@ Here are today's top headlines:
 
 {news_text}
 
-Create a comprehensive daily briefing organized by category. For each category that has news:
-
-[Keep the same detailed format as before...]
-
-Critical formatting rules:
-- Keep responses under 5 sentences total
-- Be clear and informative"""
+Create a comprehensive daily briefing organized by category. For each category that has news, keep responses under 5 sentences total and be clear and informative."""
             
             llm_summary = self.llm.generate(prompt, use_search_context=False)
             

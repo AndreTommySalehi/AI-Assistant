@@ -8,7 +8,11 @@ torch
 accelerate
 sentencepiece
 
-# Voice requirements
+# Voice requirements - Piper TTS (much faster!)
 SpeechRecognition>=3.10.0
-pyttsx3>=2.90
 pyaudio>=0.2.13
+sounddevice>=0.4.6
+soundfile>=0.12.1
+
+# Optional: For Piper installation via pip (alternative to binary)
+# piper-tts  # Uncomment if you want to install via pip

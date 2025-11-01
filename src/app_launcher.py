@@ -1,6 +1,6 @@
 """
 Application Launcher - Open apps via voice/text commands
-Supports custom app configurations with multiple launch methods
+NOW WITH AUTO-FOCUS: Apps automatically come to the front!
 """
 
 import subprocess
@@ -8,15 +8,28 @@ import platform
 import os
 import json
 import webbrowser
+import time
 
 
 class AppLauncher:
-    """Launch applications and websites"""
+    """Launch applications and websites with auto-focus"""
     
     def __init__(self, config_file="./jarvis_data/apps_config.json"):
         self.config_file = config_file
         self.system = platform.system()
         self.apps = self._load_config()
+        
+        # Windows-specific: Import win32 for window focus
+        self.win32_available = False
+        if self.system == "Windows":
+            try:
+                import win32gui
+                import win32con
+                self.win32gui = win32gui
+                self.win32con = win32con
+                self.win32_available = True
+            except ImportError:
+                pass
     
     def _load_config(self):
         """Load app configurations from file"""
@@ -51,7 +64,8 @@ class AppLauncher:
                 "windows": "start chrome",
                 "mac": "open -a 'Google Chrome'",
                 "linux": "google-chrome",
-                "aliases": ["chrome", "google chrome", "browser"]
+                "aliases": ["chrome", "google chrome", "browser"],
+                "process_name": "chrome.exe"
             },
             "calculator": {
                 "type": "app",
@@ -65,14 +79,16 @@ class AppLauncher:
                 "windows": "start spotify",
                 "mac": "open -a Spotify",
                 "linux": "spotify",
-                "aliases": ["spotify", "music"]
+                "aliases": ["spotify", "music"],
+                "process_name": "spotify.exe"
             },
             "discord": {
                 "type": "app",
                 "windows": "start discord",
                 "mac": "open -a Discord",
                 "linux": "discord",
-                "aliases": ["discord"]
+                "aliases": ["discord"],
+                "process_name": "discord.exe"
             }
         }
         
@@ -164,8 +180,59 @@ class AppLauncher:
         
         return None
     
+    def _bring_window_to_front(self, process_name=None, window_title=None, wait_time=1.5):
+        """Bring a window to the front (Windows only)"""
+        if not self.win32_available:
+            return False
+        
+        time.sleep(wait_time)  # Wait for app to launch
+        
+        try:
+            def callback(hwnd, windows):
+                if self.win32gui.IsWindowVisible(hwnd):
+                    title = self.win32gui.GetWindowText(hwnd)
+                    
+                    # Check if this is the window we want
+                    match = False
+                    if window_title and window_title.lower() in title.lower():
+                        match = True
+                    elif process_name:
+                        # Get process name for this window
+                        try:
+                            _, pid = self.win32gui.GetWindowThreadProcessId(hwnd)
+                            import psutil
+                            proc = psutil.Process(pid)
+                            if process_name.lower() in proc.name().lower():
+                                match = True
+                        except:
+                            pass
+                    
+                    if match and title:
+                        windows.append((hwnd, title))
+                return True
+            
+            windows = []
+            self.win32gui.EnumWindows(callback, windows)
+            
+            if windows:
+                # Get the first matching window
+                hwnd = windows[0][0]
+                
+                # Restore if minimized
+                if self.win32gui.IsIconic(hwnd):
+                    self.win32gui.ShowWindow(hwnd, self.win32con.SW_RESTORE)
+                
+                # Bring to front
+                self.win32gui.SetForegroundWindow(hwnd)
+                return True
+                
+        except Exception as e:
+            pass
+        
+        return False
+    
     def open_app(self, app_name):
-        """Open the specified application"""
+        """Open the specified application and bring it to front"""
         app_name = app_name.lower()
         
         if app_name not in self.apps:
@@ -180,7 +247,15 @@ class AppLauncher:
                 url = app_config.get('url', '')
                 if url:
                     webbrowser.open(url)
-                    print(f"[DEBUG] Opened website: {url}")
+                    
+                    # Try to bring browser to front
+                    time.sleep(0.5)
+                    self._bring_window_to_front(process_name="chrome.exe")
+                    if not self._bring_window_to_front(process_name="chrome.exe"):
+                        self._bring_window_to_front(process_name="firefox.exe")
+                    if not self._bring_window_to_front(process_name="firefox.exe"):
+                        self._bring_window_to_front(process_name="msedge.exe")
+                    
                     return True, f"Opening {app_name}"
                 else:
                     return False, f"No URL configured for {app_name}"
@@ -199,18 +274,36 @@ class AppLauncher:
                 if not command:
                     return False, f"No command configured for {app_name} on {self.system}"
                 
-                print(f"[DEBUG] Executing command: {command}")
-                
-                # Execute command
+                # Execute command with no window
                 if self.system == "Windows":
-                    subprocess.Popen(command, shell=True)
+                    # Use CREATE_NO_WINDOW flag to hide console flash
+                    CREATE_NO_WINDOW = 0x08000000
+                    subprocess.Popen(
+                        command, 
+                        shell=True,
+                        creationflags=CREATE_NO_WINDOW,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
                 else:
-                    subprocess.Popen(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.Popen(
+                        command, 
+                        shell=True, 
+                        stdout=subprocess.DEVNULL, 
+                        stderr=subprocess.DEVNULL
+                    )
+                
+                # Try to bring window to front after launch
+                process_name = app_config.get('process_name')
+                if process_name:
+                    self._bring_window_to_front(process_name=process_name, wait_time=1.5)
+                else:
+                    # Fallback: try to find by app name
+                    self._bring_window_to_front(window_title=app_name, wait_time=1.5)
                 
                 return True, f"Opening {app_name}"
         
         except Exception as e:
-            print(f"[DEBUG] Error opening {app_name}: {e}")
             return False, f"Failed to open {app_name}: {str(e)}"
     
     def handle_command(self, user_input):

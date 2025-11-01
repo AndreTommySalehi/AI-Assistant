@@ -1,6 +1,10 @@
 """
-Voice Assistant - Using Piper TTS for lightning-fast, high-quality speech
-Windows-compatible version with automatic setup
+Voice Assistant - OPTIMIZED VERSION (Combined)
+- Using Piper TTS for lightning-fast, high-quality speech
+- Windows-compatible with automatic setup
+- NO console flashing (completely invisible)
+- Faster response times
+- Auto-focus windows
 """
 
 import os
@@ -11,6 +15,7 @@ import subprocess
 import wave
 import json
 import platform
+import tempfile
 
 # Audio playback
 AUDIO_PLAYBACK = False
@@ -43,13 +48,16 @@ def list_microphones():
 
 
 class PiperVoice:
-    """Lightning-fast TTS using Piper"""
+    """Lightning-fast TTS using Piper - OPTIMIZED VERSION"""
     
-    def __init__(self, model_name="en_GB-alan-medium", microphone_index=None):
-        self.model_name = model_name
+    def __init__(self, model_name="en_GB-alan-low", microphone_index=None):
+        self.model_name = model_name  # Using "low" quality for SPEED
         self.microphone_index = microphone_index
         self.system = platform.system()
         self.piper_path = self._find_piper()
+        
+        # Use temp directory for audio files (faster cleanup)
+        self.temp_dir = tempfile.gettempdir()
         
         # Models directory
         if self.system == "Windows":
@@ -57,9 +65,9 @@ class PiperVoice:
         else:
             self.models_dir = os.path.join(os.path.expanduser("~"), ".local", "share", "piper-tts")
         
-        # Available British voices (download automatically)
+        # Available British voices (optimized for speed)
         self.available_voices = {
-            "alan-low": "en_GB-alan-low",        # Fast, lighter voice
+            "alan-low": "en_GB-alan-low",        # FASTEST - Default
             "alan-medium": "en_GB-alan-medium",  # Standard British
             "northern-male": "en_GB-northern_english_male-medium",  # Deep, closest to Jarvis
             "semaine": "en_GB-semaine-medium",   # Professional British male
@@ -71,13 +79,14 @@ class PiperVoice:
         # Initialize the model
         self._ensure_model_downloaded()
         
-        # Initialize speech recognition
+        # Initialize speech recognition with optimized settings
         self.recognizer = None
         if SPEECH_RECOGNITION_AVAILABLE:
             self.recognizer = sr.Recognizer()
-            self.recognizer.energy_threshold = 4000
+            # Optimized for faster response
+            self.recognizer.energy_threshold = 3000  # Lower = more sensitive
             self.recognizer.dynamic_energy_threshold = True
-            self.recognizer.pause_threshold = 1.5
+            self.recognizer.pause_threshold = 0.8    # Shorter pause = faster response
     
     def _find_piper(self):
         """Find or guide user to install piper"""
@@ -112,10 +121,12 @@ class PiperVoice:
         
         # Check PATH
         try:
+            creation_flags = subprocess.CREATE_NO_WINDOW if self.system == "Windows" else 0
             result = subprocess.run([exe_name, "--version"], 
                                    capture_output=True, 
                                    text=True, 
-                                   timeout=5)
+                                   timeout=5,
+                                   creationflags=creation_flags)
             if result.returncode == 0:
                 return exe_name
         except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -171,11 +182,8 @@ class PiperVoice:
         print("   (This only happens once, ~20-30 MB)")
         
         # Download URLs - HuggingFace format
-        # Model name format: en_GB-alan-medium
-        # URL format: https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_GB/alan/medium/
-        
         lang_region = self.model_name.split('-')[0]  # e.g., en_GB
-        voice_name_quality = '-'.join(self.model_name.split('-')[1:])  # e.g., alan-medium
+        voice_name_quality = '-'.join(self.model_name.split('-')[1:])  # e.g., alan-low
         
         base_url = f"https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/{lang_region.split('_')[0]}/{lang_region}/{voice_name_quality.replace('-', '/')}/"
         model_url = f"{base_url}{self.model_name}.onnx"
@@ -204,12 +212,23 @@ class PiperVoice:
             print(f"      Save to: {config_path}")
             raise
     
+    def _get_startup_info(self):
+        """Get Windows STARTUPINFO to hide console window"""
+        if self.system != "Windows":
+            return None
+        
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+        return startupinfo
+    
     def speak(self, text, wait=True):
-        """Generate and play speech"""
+        """Generate and play speech - OPTIMIZED FOR SPEED & NO CONSOLE FLASH"""
         if not text:
             return
         
-        temp_file = "./temp_speech.wav"
+        # Use temp file that gets cleaned up automatically
+        temp_file = os.path.join(self.temp_dir, "jarvis_speech.wav")
         
         try:
             # Generate speech with Piper (lightning fast!)
@@ -221,17 +240,22 @@ class PiperVoice:
                 "--output_file", temp_file
             ]
             
-            # Run piper
+            # CRITICAL: Use CREATE_NO_WINDOW to prevent console flash on Windows
+            creation_flags = subprocess.CREATE_NO_WINDOW if self.system == "Windows" else 0
+            
+            # Run piper with NO VISIBLE WINDOW
             result = subprocess.run(
                 cmd,
                 input=text,
                 text=True,
                 capture_output=True,
-                timeout=10
+                timeout=5,  # Faster timeout
+                creationflags=creation_flags,
+                # These prevent window flash
+                startupinfo=self._get_startup_info() if self.system == "Windows" else None
             )
             
             if result.returncode != 0:
-                print(f"Piper error: {result.stderr}")
                 return
             
             # Play audio with proper blocking
@@ -243,7 +267,8 @@ class PiperVoice:
                 
                 # Always use blocking playback for sentences
                 sd.play(data, samplerate)
-                sd.wait()  # Block until playback finishes
+                if wait:
+                    sd.wait()  # Block until playback finishes
             
             # Cleanup
             try:
@@ -252,9 +277,9 @@ class PiperVoice:
                 pass
                 
         except subprocess.TimeoutExpired:
-            print("Speech generation timeout")
-        except Exception as e:
-            print(f"Speech error: {e}")
+            pass
+        except Exception:
+            pass
     
     def speak_streaming(self, text):
         """Stream response sentence by sentence with proper waiting"""
@@ -272,7 +297,7 @@ class PiperVoice:
             self.speak(sentence.strip(), wait=True)
     
     def listen(self, timeout=5, phrase_limit=None):
-        """Listen for speech input"""
+        """Listen for speech input - OPTIMIZED"""
         if not self.recognizer:
             return None
         
@@ -284,7 +309,8 @@ class PiperVoice:
             with sr.Microphone(**mic_kwargs) as source:
                 print("\nListening...", end=" ", flush=True)
                 
-                self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                # Faster ambient noise adjustment
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.3)
                 
                 audio = self.recognizer.listen(
                     source,
@@ -312,7 +338,7 @@ class PiperVoice:
             return None
     
     def listen_continuous(self, timeout=None):
-        """Continuously listen and return full phrase"""
+        """Continuously listen and return full phrase - OPTIMIZED"""
         if not self.recognizer:
             return None
         
@@ -322,7 +348,8 @@ class PiperVoice:
                 mic_kwargs['device_index'] = self.microphone_index
                 
             with sr.Microphone(**mic_kwargs) as source:
-                self.recognizer.adjust_for_ambient_noise(source, duration=0.3)
+                # Faster ambient noise adjustment
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.2)
                 
                 audio = self.recognizer.listen(
                     source,
@@ -387,7 +414,7 @@ class PiperVoice:
 
 
 class VoiceAssistant:
-    """Voice wrapper for Jarvis with Piper TTS"""
+    """Voice wrapper for Jarvis with Piper TTS - OPTIMIZED VERSION"""
     
     def __init__(self, jarvis_assistant, voice_enabled=True, voice_mode="piper", microphone_index=None):
         self.assistant = jarvis_assistant
@@ -398,8 +425,9 @@ class VoiceAssistant:
         
         if voice_enabled:
             try:
-                self.voice = PiperVoice(microphone_index=microphone_index)
-                print("✓ Piper TTS initialized (lightning fast!)")
+                # Use FAST voice model by default for speed
+                self.voice = PiperVoice(model_name="en_GB-alan-low", microphone_index=microphone_index)
+                print("✓ Fast voice system ready (optimized)")
             except Exception as e:
                 print(f"Voice init failed: {e}")
                 self.voice_enabled = False
@@ -439,7 +467,7 @@ class VoiceAssistant:
             self.speak_response(response, user_input)
     
     def wake_word_mode(self):
-        """Continuous listening mode"""
+        """Continuous listening mode - OPTIMIZED WITH COOLDOWN"""
         if not self.voice_enabled or not self.voice:
             print("Voice system not available")
             return
@@ -447,6 +475,10 @@ class VoiceAssistant:
         self.voice.speak("Continuous listening activated. I'm ready, sir.", wait=True)
         print("\nListening continuously... Say 'Jarvis' followed by your command")
         print("(Press Ctrl+C to exit)\n")
+        
+        import time
+        last_command_time = 0
+        cooldown_period = 2.0  # Prevent duplicate commands within 2 seconds
         
         while True:
             try:
@@ -456,9 +488,16 @@ class VoiceAssistant:
                     continue
                 
                 if self.wake_word in heard_text:
+                    # Check cooldown to prevent duplicate processing
+                    current_time = time.time()
+                    if current_time - last_command_time < cooldown_period:
+                        continue  # Skip if too soon after last command
+                    
                     command = self.voice.extract_command_after_wake_word(heard_text, self.wake_word)
                     
                     if command:
+                        last_command_time = current_time  # Update cooldown timer
+                        
                         print(f"\nDetected: {heard_text}")
                         print(f"Command: {command}")
                         

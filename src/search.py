@@ -1,7 +1,6 @@
 """
 Unlimited web search - No API keys, No rate limits
-Uses multiple search methods with fallbacks
-Enhanced with better parsing and error handling
+FIXED: No console window flashing
 """
 
 import warnings
@@ -14,16 +13,19 @@ from bs4 import BeautifulSoup
 import random
 import urllib.parse
 import json
+import subprocess
+import platform
 
 
 class WebSearch:
-    """Multi-source web search with unlimited usage"""
+    """Multi-source web search with unlimited usage - NO CONSOLE FLASH"""
     
     def __init__(self):
         self.search_keywords = config.SEARCH_KEYWORDS
         self.credible_domains = config.CREDIBLE_DOMAINS
         self.max_results = config.SEARCH_MAX_RESULTS
         self.timeout = config.SEARCH_TIMEOUT
+        self.system = platform.system()
         
         # Rotating user agents to avoid detection
         self.user_agents = [
@@ -52,6 +54,22 @@ class WebSearch:
             'Sec-Fetch-Mode': 'navigate',
             'Sec-Fetch-Site': 'none'
         }
+    
+    def _get_creation_flags(self):
+        """Get subprocess creation flags to hide console"""
+        if self.system == "Windows":
+            return subprocess.CREATE_NO_WINDOW
+        return 0
+    
+    def _get_startup_info(self):
+        """Get startup info to hide console on Windows"""
+        if self.system != "Windows":
+            return None
+        
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+        return startupinfo
     
     def search(self, query):
         """Try multiple search methods until one works"""

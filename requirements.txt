@@ -14,5 +14,9 @@ pyaudio>=0.2.13
 sounddevice>=0.4.6
 soundfile>=0.12.1
 
+# Windows-specific for window management (auto-focus apps)
+pywin32>=305; sys_platform == 'win32'
+psutil>=5.9.0
+
 # Optional: For Piper installation via pip (alternative to binary)
 # piper-tts  # Uncomment if you want to install via pip

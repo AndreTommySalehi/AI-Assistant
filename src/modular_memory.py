@@ -1,8 +1,3 @@
-"""
-MODULAR Memory System - Easily upgradeable and extensible
-Each component is independent and can be swapped out
-"""
-
 import json
 import os
 from datetime import datetime, timedelta
@@ -19,12 +14,10 @@ except ImportError as e:
 
 
 # ============================================================================
-# BASE CLASSES - Define interfaces for each component
+# BASE CLASSES
 # ============================================================================
 
 class MemoryBackend(ABC):
-    """Base class for memory storage - swap this out for databases, cloud, etc."""
-    
     @abstractmethod
     def save_fact(self, fact, category, metadata=None):
         pass
@@ -39,28 +32,23 @@ class MemoryBackend(ABC):
 
 
 class LearningEngine(ABC):
-    """Base class for learning algorithms - upgrade learning strategies here"""
-    
     @abstractmethod
     def extract_facts(self, text, context=None):
-        """Return list of learned facts with confidence scores"""
         pass
 
 
 class ContextRetriever(ABC):
-    """Base class for retrieving relevant context - upgrade search methods here"""
-    
     @abstractmethod
     def get_relevant_context(self, query, limit=5):
         pass
 
 
 # ============================================================================
-# IMPLEMENTATIONS - Current versions (easy to upgrade later)
+# IMPLEMENTATIONS
 # ============================================================================
 
 class JSONMemoryBackend(MemoryBackend):
-    """File-based memory storage - V1"""
+    """File-based memory storage"""
     
     def __init__(self, filepath):
         self.filepath = filepath
@@ -80,10 +68,19 @@ class JSONMemoryBackend(MemoryBackend):
             json.dump(self.data, f, indent=2)
     
     def save_fact(self, fact, category, metadata=None):
-        # Check for duplicates
+        # Check for duplicates with better matching
+        fact_lower = fact.lower().strip()
         for existing in self.data["facts"]:
-            if existing["fact"].lower().strip() == fact.lower().strip():
-                return False  # Already exists
+            existing_lower = existing["fact"].lower().strip()
+            # More lenient duplicate checking
+            if self._are_similar(fact_lower, existing_lower):
+                # Update if new fact is more specific
+                if len(fact) > len(existing["fact"]):
+                    existing["fact"] = fact
+                    existing["timestamp"] = datetime.now().isoformat()
+                    existing["metadata"] = metadata or {}
+                    self._save()
+                return False
         
         fact_entry = {
             "fact": fact,
@@ -98,26 +95,50 @@ class JSONMemoryBackend(MemoryBackend):
         self._save()
         return True
     
+    def _are_similar(self, fact1, fact2):
+        """Check if two facts are similar enough to be duplicates"""
+        # Exact match
+        if fact1 == fact2:
+            return True
+        
+        # Check if one contains the other (for birthday updates)
+        if fact1 in fact2 or fact2 in fact1:
+            return True
+        
+        # Word overlap check
+        words1 = set(fact1.split())
+        words2 = set(fact2.split())
+        overlap = len(words1 & words2)
+        min_length = min(len(words1), len(words2))
+        
+        # If 70% of words match, consider it similar
+        if min_length > 0 and overlap / min_length > 0.7:
+            return True
+        
+        return False
+    
     def get_facts(self, query=None, limit=10):
         if not query:
             return self.data["facts"][-limit:]
         
-        # IMPROVED: Better keyword matching with synonyms
         query_lower = query.lower()
         relevant = []
         
-        # Extract keywords and expand with common variations
+        # Better keyword matching
         query_words = query_lower.split()
         expanded_keywords = set(query_words)
         
-        # Add common variations
+        # Synonym expansion
         keyword_map = {
-            'favorite': ['favourite', 'fav', 'like', 'prefer', 'love'],
+            'birthday': ['birthday', 'born', 'birth date', 'age', 'bday'],
+            'favorite': ['favorite', 'favourite', 'fav', 'like', 'prefer', 'love'],
             'pizza': ['pizza', 'pie'],
             'food': ['food', 'eat', 'meal', 'dish'],
             'game': ['game', 'gaming', 'play'],
-            'live': ['live', 'from', 'location'],
-            'name': ['name', 'called']
+            'live': ['live', 'from', 'location', 'city'],
+            'name': ['name', 'called'],
+            'dog': ['dog', 'puppy', 'pet'],
+            'cat': ['cat', 'kitten', 'pet'],
         }
         
         for word in query_words:
@@ -126,6 +147,15 @@ class JSONMemoryBackend(MemoryBackend):
         
         for fact in self.data["facts"]:
             fact_lower = fact["fact"].lower()
+            
+            # Prioritize exact category matches
+            if fact["category"] == "identity" and any(k in query_lower for k in ['birthday', 'born', 'age']):
+                if any(keyword in fact_lower for keyword in expanded_keywords):
+                    fact["access_count"] = fact.get("access_count", 0) + 1
+                    fact["last_accessed"] = datetime.now().isoformat()
+                    relevant.insert(0, fact)  # Put at front
+                    continue
+            
             # Check if any expanded keyword matches
             if any(keyword in fact_lower for keyword in expanded_keywords):
                 fact["access_count"] = fact.get("access_count", 0) + 1
@@ -133,65 +163,102 @@ class JSONMemoryBackend(MemoryBackend):
                 relevant.append(fact)
         
         self._save()
-        return relevant[-limit:] if relevant else []
+        
+        # Sort by access count and recency
+        relevant.sort(key=lambda x: (x.get("access_count", 0), x["timestamp"]), reverse=True)
+        
+        return relevant[:limit] if relevant else []
     
     def get_all_facts(self):
         return self.data["facts"]
 
 
 class LLMBasedLearning(LearningEngine):
-    """Learning using LLM analysis - V1"""
+    """Learning using LLM - IMPROVED with better filtering"""
     
     def __init__(self, llm_handler):
         self.llm = llm_handler
+        
+        # Phrases to NEVER learn from (trivial/generic responses)
+        self.ignore_phrases = [
+            "i'm fine", "i'm okay", "i'm good", "i'm alright",
+            "sounds good", "that's fine", "no problem", "sure",
+            "yes", "no", "maybe", "thanks", "thank you",
+            "okay", "ok", "cool", "nice", "great",
+            "i see", "got it", "understood", "alright"
+        ]
     
     def extract_facts(self, text, context=None):
-        """Use LLM to extract facts from conversation"""
+        """Use LLM to extract IMPORTANT facts only"""
         
-        # Skip if message is too short or is a question
+        # Skip if too short
         if len(text.split()) < 3:
             return []
         
-        # Don't try to learn from questions
-        question_words = ['what', 'where', 'when', 'who', 'why', 'how', 'is', 'are', 'do', 'does', 'can', 'could', 'would']
-        if any(text.lower().strip().startswith(q) for q in question_words):
+        # Skip trivial responses
+        text_lower = text.lower().strip()
+        if any(phrase in text_lower for phrase in self.ignore_phrases):
             return []
         
-        analysis_prompt = f"""Extract personal information from this statement.
+        # Skip questions
+        if any(text_lower.startswith(q) for q in ['what', 'where', 'when', 'who', 'why', 'how', 'is', 'are', 'do', 'does', 'can', 'could', 'would']):
+            return []
+        
+        # Enhanced prompt for better extraction
+        analysis_prompt = f"""Extract ONLY important personal facts from this statement. Ignore generic responses.
 
 User said: "{text}"
 
-What facts can we learn? Examples:
-- "I love pineapple pizza" → User likes pineapple pizza (preferences)
-- "My name is Alex" → User's name is Alex (identity)
-- "I live in Seattle" → User lives in Seattle (identity)
+RULES:
+1. IGNORE: "I'm fine", "sounds good", "okay", "yes", "no", "thanks" - these are NOT facts
+2. For birthdays: Always specify if it's the USER'S birthday or someone else's (dog, family, friend)
+3. Extract names, dates, preferences, relationships, goals
+4. Only extract if confidence > 0.85 (very certain)
 
-Return JSON list:
+Examples:
+✓ "My birthday is March 24, 2010" → {{"fact": "User's birthday is March 24, 2010", "category": "identity", "confidence": 0.95}}
+✓ "My dog's birthday is June 5" → {{"fact": "User's dog's birthday is June 5", "category": "relationships", "confidence": 0.90}}
+✗ "I'm fine" → [] (ignore trivial response)
+✗ "Sounds good" → [] (ignore trivial response)
+
+Return JSON list (empty [] if nothing important):
 [
-  {{"fact": "User likes pineapple pizza", "category": "preferences", "confidence": 0.90}}
+  {{"fact": "...", "category": "...", "confidence": 0.xx}}
 ]
 
 Categories: identity, interests, preferences, relationships, events, goals, routines, other
-Only extract if confidence > 0.7. Return [] if nothing to extract.
 
 JSON only:"""
         
         try:
             response = self.llm.generate(analysis_prompt, use_search_context=False)
             
-            # Try to find JSON in response
+            # Find JSON in response
             json_match = re.search(r'\[.*?\]', response, re.DOTALL)
             
             if json_match:
                 facts = json.loads(json_match.group(0))
-                # Filter by confidence and clean up
+                
+                # Very strict filtering - only high confidence, important facts
                 valid_facts = []
                 for f in facts:
-                    if f.get('confidence', 0) >= 0.7:
-                        # Make sure fact is well-formed
-                        fact_text = f.get('fact', '').strip()
-                        if len(fact_text) > 5:
-                            valid_facts.append(f)
+                    confidence = f.get('confidence', 0)
+                    fact_text = f.get('fact', '').strip().lower()
+                    
+                    # Skip if low confidence
+                    if confidence < 0.85:
+                        continue
+                    
+                    # Skip if contains trivial phrases
+                    if any(phrase in fact_text for phrase in self.ignore_phrases):
+                        continue
+                    
+                    # Fact must be substantial
+                    if len(fact_text) < 10:
+                        continue
+                    
+                    valid_facts.append(f)
+                
                 return valid_facts
             
         except Exception as e:
@@ -201,62 +268,91 @@ JSON only:"""
 
 
 class PatternBasedLearning(LearningEngine):
-    """Pattern recognition learning - V1 (fast, no LLM needed)"""
+    """Pattern recognition - IMPROVED"""
     
     def extract_facts(self, text, context=None):
-        """Extract facts using improved pattern matching"""
+        """Extract facts using patterns - IGNORES trivial responses"""
         facts = []
         text_lower = text.lower()
+        
+        # CRITICAL: Skip trivial responses
+        trivial = [
+            "i'm fine", "i'm okay", "i'm good", "i'm alright",
+            "sounds good", "that's fine", "no problem", "sure",
+            "yes", "no", "maybe", "thanks", "okay", "ok", "cool"
+        ]
+        if any(phrase in text_lower for phrase in trivial):
+            return []
         
         # Skip questions
         if any(text_lower.strip().startswith(q) for q in ['what', 'where', 'when', 'who', 'why', 'how', 'is', 'are', 'do', 'does']):
             return []
         
+        # Pattern: Birthday (with clear subject identification)
+        birthday_patterns = [
+            (r"my birthday is ([A-Z][a-z]+ \d{1,2},? \d{4})", "identity", 0.95, "User's birthday is {}"),
+            (r"i was born (?:on )?([A-Z][a-z]+ \d{1,2},? \d{4})", "identity", 0.95, "User's birthday is {}"),
+            (r"my (?:dog|cat|pet)(?:'s)? birthday is ([A-Z][a-z]+ \d{1,2})", "relationships", 0.90, "User's pet's birthday is {}"),
+        ]
+        
+        for pattern, category, confidence, fact_template in birthday_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                date = match.group(1).strip()
+                fact = fact_template.format(date)
+                facts.append({
+                    "fact": fact,
+                    "category": category,
+                    "confidence": confidence
+                })
+        
         # Pattern: Name
         name_patterns = [
-            (r"(?:my name is|i'm|i am|call me)\s+([A-Z][a-z]+)", "identity", 0.90),
-            (r"(?:i'm|my name's)\s+([A-Z][a-z]+)", "identity", 0.85),
+            (r"(?:my name is|i'm|i am|call me)\s+([A-Z][a-z]+)", "identity", 0.90, "User's name is {}"),
         ]
+        
+        for pattern, category, confidence, fact_template in name_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                name = match.group(1).strip()
+                if name not in ['Fine', 'Okay', 'Good', 'Alright']:  # Don't learn "I'm Fine" as name
+                    fact = fact_template.format(name)
+                    facts.append({
+                        "fact": fact,
+                        "category": category,
+                        "confidence": confidence
+                    })
         
         # Pattern: Location
         location_patterns = [
-            (r"(?:i live in|i'm from|from)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", "identity", 0.88),
-            (r"(?:based in|located in)\s+([A-Z][a-z]+)", "identity", 0.85),
+            (r"i live in ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", "identity", 0.88, "User lives in {}"),
+            (r"i'm from ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", "identity", 0.88, "User is from {}"),
         ]
         
-        # Pattern: Preferences (IMPROVED for pizza/food)
-        preference_patterns = [
-            (r"i (?:love|really like|like|enjoy)\s+([a-z\s]{3,30}?)(?:\s+pizza|\s+food|\.|!|,)", "preferences", 0.88),
-            (r"(?:big fan of|passionate about)\s+([a-z\s]{3,30})", "preferences", 0.85),
-            (r"i prefer\s+([^.!?]+?)(?:\s+over|\s+to)", "preferences", 0.85),
-            (r"my (?:favorite|favourite|fav)\s+([a-z]+)\s+is\s+([^.!?]+)", "preferences", 0.92),
-        ]
-        
-        # Pattern: Interests
-        interest_patterns = [
-            (r"i (?:love|really like|enjoy|am into)\s+([a-z\s]{3,30})(?:\.|!|,|\s+and\s)", "interests", 0.85),
-        ]
-        
-        # Pattern: Goals/Plans
-        goal_patterns = [
-            (r"i (?:want to|plan to|hope to|trying to)\s+([^.!?]{5,50})", "goals", 0.80),
-            (r"(?:my goal is|i'm working on)\s+([^.!?]+)", "goals", 0.85),
-        ]
-        
-        all_patterns = (
-            name_patterns + location_patterns + preference_patterns + 
-            interest_patterns + goal_patterns
-        )
-        
-        for pattern, category, confidence in all_patterns:
+        for pattern, category, confidence, fact_template in location_patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                fact = match.group(0).strip()
-                # Clean up common issues
-                fact = re.sub(r'\s+', ' ', fact)  # Multiple spaces
-                fact = fact.rstrip('.,!?')  # Trailing punctuation
-                
-                if len(fact) > 5 and len(fact.split()) < 15:  # Reasonable length
+                location = match.group(1).strip()
+                fact = fact_template.format(location)
+                facts.append({
+                    "fact": fact,
+                    "category": category,
+                    "confidence": confidence
+                })
+        
+        # Pattern: Strong preferences (avoid weak ones)
+        strong_preference_patterns = [
+            (r"i (?:really love|absolutely love|love)\s+([a-z\s]{3,30})(?:\.|!|,)", "preferences", 0.88, "User loves {}"),
+            (r"my favorite\s+(?:food|game|movie|book|color)\s+is\s+([^.!?,]+)", "preferences", 0.92, "User's favorite is {}"),
+        ]
+        
+        for pattern, category, confidence, fact_template in strong_preference_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                thing = match.group(1).strip()
+                # Must be substantial
+                if len(thing) > 3 and thing not in trivial:
+                    fact = fact_template.format(thing)
                     facts.append({
                         "fact": fact,
                         "category": category,
@@ -267,7 +363,7 @@ class PatternBasedLearning(LearningEngine):
 
 
 class SemanticContextRetriever(ContextRetriever):
-    """Semantic search using embeddings - V1"""
+    """Semantic search using embeddings"""
     
     def __init__(self, persist_directory):
         if not CHROMADB_AVAILABLE:
@@ -277,13 +373,9 @@ class SemanticContextRetriever(ContextRetriever):
         
         try:
             self.client = chromadb.PersistentClient(path=persist_directory)
-            print(f"  - ChromaDB client created")
-            
             self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
                 model_name="all-MiniLM-L6-v2"
             )
-            print(f"  - Embedding function loaded")
-            
             self.collection = self.client.get_or_create_collection(
                 name="jarvis_semantic_memory",
                 embedding_function=self.embedding_function
@@ -329,14 +421,11 @@ class SemanticContextRetriever(ContextRetriever):
 
 
 # ============================================================================
-# MAIN MEMORY SYSTEM - Orchestrates all components
+# MAIN MEMORY SYSTEM
 # ============================================================================
 
 class ModularMemorySystem:
-    """
-    Main memory system that uses pluggable components.
-    Easy to upgrade individual parts without breaking everything!
-    """
+    """Main memory system with much better fact filtering"""
     
     def __init__(self, data_dir="./jarvis_data", llm_handler=None, config=None):
         self.data_dir = data_dir
@@ -344,12 +433,12 @@ class ModularMemorySystem:
         
         config = config or {}
         
-        # Component 1: Storage Backend (easily swap to database later)
+        # Storage Backend
         self.storage = JSONMemoryBackend(
             os.path.join(data_dir, "memory_v2.json")
         )
         
-        # Component 2: Learning Engines (can use multiple!)
+        # Learning Engines
         self.learning_engines = []
         
         if llm_handler:
@@ -357,12 +446,12 @@ class ModularMemorySystem:
                 LLMBasedLearning(llm_handler)
             )
         
-        # Always have pattern-based as fallback (fast, no LLM)
+        # Pattern-based as fallback
         self.learning_engines.append(
             PatternBasedLearning()
         )
         
-        # Component 3: Context Retriever
+        # Context Retriever
         self.context_retriever = None
         if CHROMADB_AVAILABLE:
             try:
@@ -386,10 +475,7 @@ class ModularMemorySystem:
         print(f"  - Learning engines: {len(self.learning_engines)}")
     
     def learn_from_conversation(self, user_message, assistant_response=None):
-        """
-        Learn from conversation using all available engines.
-        Returns number of facts learned.
-        """
+        """Learn from conversation - MUCH STRICTER filtering"""
         learned_count = 0
         
         # Try each learning engine
@@ -401,6 +487,10 @@ class ModularMemorySystem:
                     fact = fact_data.get('fact', '')
                     category = fact_data.get('category', 'general')
                     confidence = fact_data.get('confidence', 0.8)
+                    
+                    # Only save high-confidence facts
+                    if confidence < 0.85:
+                        continue
                     
                     # Save to storage
                     if self.storage.save_fact(fact, category, {
@@ -434,13 +524,13 @@ class ModularMemorySystem:
     def get_context_for_query(self, query):
         """Get relevant context using best available method"""
         
-        # Method 1: Semantic search (best, if available)
+        # Method 1: Semantic search (best)
         if self.context_retriever:
             context = self.context_retriever.get_relevant_context(query, limit=5)
             if context:
                 return self._format_context(context)
         
-        # Method 2: Fallback to keyword search
+        # Method 2: Keyword search
         facts = self.storage.get_facts(query, limit=5)
         if facts:
             context = [{'fact': f['fact'], 'category': f['category']} for f in facts]
@@ -489,10 +579,7 @@ class ModularMemorySystem:
         }
     
     def export_training_data(self, filepath):
-        """
-        Export all conversations in format ready for fine-tuning.
-        Future-proofing for when you want to fine-tune!
-        """
+        """Export all facts for fine-tuning"""
         all_facts = self.storage.get_all_facts()
         
         training_data = {
@@ -508,6 +595,5 @@ class ModularMemorySystem:
             json.dump(training_data, f, indent=2)
         
         print(f"✓ Exported {len(all_facts)} facts to {filepath}")
-        print("  Ready for fine-tuning when you need it!")
         
         return filepath

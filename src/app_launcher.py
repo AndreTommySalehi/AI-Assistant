@@ -1,8 +1,3 @@
-"""
-Application Launcher - Open apps via voice/text commands
-NOW WITH AUTO-FOCUS: Apps automatically come to the front!
-"""
-
 import subprocess
 import platform
 import os

@@ -1,8 +1,3 @@
-"""
-Calendar Handler - Complete calendar management system
-Handles both conversational and direct event creation
-"""
-
 import webbrowser
 import urllib.parse
 import re

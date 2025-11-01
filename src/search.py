@@ -1,8 +1,3 @@
-"""
-Unlimited web search - No API keys, No rate limits
-FIXED: No console window flashing
-"""
-
 import warnings
 warnings.filterwarnings("ignore")
 

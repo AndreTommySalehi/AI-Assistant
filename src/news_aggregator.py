@@ -1,8 +1,3 @@
-"""
-Enhanced News Aggregator - With topic deep-dive capability
-Users can select topics from the daily recap for more details
-"""
-
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime

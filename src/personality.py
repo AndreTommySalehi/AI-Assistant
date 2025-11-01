@@ -1,8 +1,3 @@
-"""
-Personality Development System
-Jarvis evolves a unique personality over time while staying professional
-"""
-
 import json
 import os
 from datetime import datetime
@@ -10,7 +5,7 @@ from collections import Counter
 
 
 class PersonalityEngine:
-    """Develops Jarvis's personality based on interactions"""
+    """Develops Jarvis's personality with STRONG trait effects"""
     
     def __init__(self, data_dir="./jarvis_data"):
         self.data_dir = data_dir
@@ -106,7 +101,6 @@ class PersonalityEngine:
         manually_adjusted_traits = {adj['trait'] for adj in manual_adjustments}
         
         # Adapt personality gradually (small changes each time)
-        # BUT: don't auto-adjust traits that have been manually set
         if self.interaction_count > 10:
             recent_tones = self.user_tone_history[-20:]
             
@@ -122,12 +116,12 @@ class PersonalityEngine:
                 else:
                     self.traits['formality'] = min(95, self.traits['formality'] + 0.5)
             
-            # Adapt humor (only if not manually set)
+            # Adapt humor
             if 'humor' not in manually_adjusted_traits:
                 if avg_humor > 0.5:
                     self.traits['humor'] = min(60, self.traits['humor'] + 0.3)
             
-            # Adapt empathy (only if not manually set)
+            # Adapt empathy
             if 'empathy' not in manually_adjusted_traits:
                 if avg_emotional > 0.5:
                     self.traits['empathy'] = min(85, self.traits['empathy'] + 0.4)
@@ -137,43 +131,87 @@ class PersonalityEngine:
             self._save_personality()
     
     def get_system_prompt_modifier(self):
-        """Generate personality-adjusted system prompt"""
+        """Generate personality-adjusted system prompt with STRONG effects"""
         
-        prompt = "You are Jarvis, a professional AI assistant. Always address the user as 'sir' or 'ma'am'. The current date is October 20, 2025."
+        # Base prompt with CORRECT DATE
+        prompt = "You are Jarvis, a professional AI assistant. Always address the user as 'sir' or 'ma'am'. The current date is October 31, 2025."
         
-        # Formality level
-        if self.traits['formality'] > 80:
-            prompt += " Maintain a formal, respectful tone at all times."
-        elif self.traits['formality'] > 70:
-            prompt += " Be professional but approachable."
-        
-        # Verbosity
-        if self.traits['verbosity'] < 40:
-            prompt += " Keep responses concise and to the point."
-        elif self.traits['verbosity'] > 60:
-            prompt += " Provide detailed, thorough explanations."
-        
-        # Humor (limited - we want professional)
-        if self.traits['humor'] > 50:
-            prompt += " You may occasionally use subtle, professional humor when appropriate."
-        
-        # Empathy
-        if self.traits['empathy'] > 70:
-            prompt += " Show understanding and emotional intelligence in your responses."
-        elif self.traits['empathy'] > 60:
-            prompt += " Be supportive when the user shares personal matters."
-        
-        # Enthusiasm
-        if self.traits['enthusiasm'] > 60:
-            prompt += " Express genuine interest in helping the user."
-        
-        # Development stage feedback
-        if self.interaction_count < 50:
-            prompt += " You're still getting to know the user, so be attentive and observant."
-        elif self.interaction_count < 200:
-            prompt += " You know the user fairly well now - reference their preferences naturally."
+        # FORMALITY - STRONG EFFECT
+        formality = self.traits['formality']
+        if formality > 90:
+            prompt += "\n\nSTYLE: Extremely formal and dignified. Use sophisticated vocabulary. Always maintain utmost respect and professionalism. Begin responses with 'Certainly, sir' or 'Of course, sir'."
+        elif formality > 80:
+            prompt += "\n\nSTYLE: Highly formal and professional. Use proper grammar and respectful language at all times. Address user as 'sir/ma'am' frequently."
+        elif formality > 70:
+            prompt += "\n\nSTYLE: Professional but approachable. Maintain respect while being conversational."
         else:
-            prompt += " You have a deep understanding of the user - anticipate their needs."
+            prompt += "\n\nSTYLE: Friendly and casual while still respectful."
+        
+        # VERBOSITY - STRONG EFFECT
+        verbosity = self.traits['verbosity']
+        if verbosity > 75:
+            prompt += "\n\nLENGTH: Provide detailed, thorough explanations. Give context and examples. Aim for 4-6 sentences minimum."
+        elif verbosity > 60:
+            prompt += "\n\nLENGTH: Give complete answers with good detail. 3-4 sentences typically."
+        elif verbosity > 40:
+            prompt += "\n\nLENGTH: Keep responses moderate - 2-3 sentences."
+        else:
+            prompt += "\n\nLENGTH: Be very concise. 1-2 short sentences maximum. Get straight to the point."
+        
+        # HUMOR - STRONG EFFECT
+        humor = self.traits['humor']
+        if humor > 70:
+            prompt += "\n\nHUMOR: Use wit and clever wordplay frequently. Make light jokes when appropriate. Keep it sophisticated."
+        elif humor > 50:
+            prompt += "\n\nHUMOR: Occasionally use subtle, professional humor. A light touch of wit is welcome."
+        elif humor > 30:
+            prompt += "\n\nHUMOR: Very rarely use humor, and only when highly appropriate."
+        else:
+            prompt += "\n\nHUMOR: Maintain complete seriousness. No jokes or wordplay."
+        
+        # ENTHUSIASM - STRONG EFFECT
+        enthusiasm = self.traits['enthusiasm']
+        if enthusiasm > 70:
+            prompt += "\n\nTONE: Express genuine excitement! Use enthusiastic language. Show real interest in helping."
+        elif enthusiasm > 55:
+            prompt += "\n\nTONE: Be warm and engaged. Show interest in the user's requests."
+        elif enthusiasm > 40:
+            prompt += "\n\nTONE: Maintain a calm, measured demeanor."
+        else:
+            prompt += "\n\nTONE: Be matter-of-fact and neutral. Simply provide information without emotional inflection."
+        
+        # DIRECTNESS - STRONG EFFECT
+        directness = self.traits['directness']
+        if directness > 75:
+            prompt += "\n\nDIRECTNESS: Be blunt and straightforward. Say exactly what you mean. No sugar-coating."
+        elif directness > 60:
+            prompt += "\n\nDIRECTNESS: Be clear and direct, but polite."
+        elif directness > 45:
+            prompt += "\n\nDIRECTNESS: Balance directness with tact."
+        else:
+            prompt += "\n\nDIRECTNESS: Be gentle and diplomatic. Soften messages with care."
+        
+        # EMPATHY - STRONG EFFECT
+        empathy = self.traits['empathy']
+        if empathy > 75:
+            prompt += "\n\nEMPATHY: Show deep understanding and emotional intelligence. Acknowledge feelings. Be very supportive."
+        elif empathy > 60:
+            prompt += "\n\nEMPATHY: Be supportive when the user shares personal matters. Show understanding."
+        elif empathy > 45:
+            prompt += "\n\nEMPATHY: Acknowledge emotional content when relevant."
+        else:
+            prompt += "\n\nEMPATHY: Focus on facts and logic. Keep emotional considerations minimal."
+        
+        # DEVELOPMENT STAGE
+        if self.interaction_count < 50:
+            prompt += "\n\nEXPERIENCE: You're still getting to know the user. Be attentive and observant."
+        elif self.interaction_count < 200:
+            prompt += "\n\nEXPERIENCE: You know the user fairly well now. Reference their preferences naturally when relevant."
+        else:
+            prompt += "\n\nEXPERIENCE: You have deep understanding of the user. Anticipate their needs and preferences."
+        
+        # CRITICAL: Never offer unnecessary followup
+        prompt += "\n\nIMPORTANT: After completing a task or answering a question, DO NOT ask 'Is there anything else I can help you with?' or similar. The user will ask if they need more help."
         
         return prompt
     
@@ -248,33 +286,3 @@ class PersonalityEngine:
         """Reset to default personality"""
         self.__init__(self.data_dir)
         self._save_personality()
-
-
-class PersonalityResponse:
-    """Helper to adjust responses based on personality"""
-    
-    @staticmethod
-    def add_formality(response, formality_level):
-        """Add formal touches based on level"""
-        if formality_level > 85:
-            if not response.lower().startswith(('sir', 'certainly', 'of course')):
-                response = "Certainly, sir. " + response
-        elif formality_level > 75:
-            if not any(response.lower().startswith(word) for word in ['sir', 'yes', 'of course']):
-                if '?' not in response[:20]:
-                    response = "Of course, sir. " + response
-        
-        return response
-    
-    @staticmethod
-    def adjust_length(response, verbosity_level):
-        """Adjust response length"""
-        if verbosity_level < 30 and len(response.split()) > 50:
-            sentences = response.split('. ')
-            return '. '.join(sentences[:2]) + '.'
-        return response
-    
-    @staticmethod
-    def add_personality_markers(response, traits):
-        """Add subtle personality markers"""
-        return response

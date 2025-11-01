@@ -1,12 +1,3 @@
-"""
-Voice Assistant - OPTIMIZED VERSION (Combined)
-- Using Piper TTS for lightning-fast, high-quality speech
-- Windows-compatible with automatic setup
-- NO console flashing (completely invisible)
-- Faster response times
-- Auto-focus windows
-"""
-
 import os
 import sys
 import warnings

@@ -1,9 +1,3 @@
-"""
-Jarvis Assistant - Modular architecture
-Fixed: News triggers and two-step news system
-Added: Calendar integration (removed email)
-"""
-
 from datetime import datetime
 import re
 from .llm import LLMHandler
@@ -12,7 +6,6 @@ from .modular_memory import ModularMemorySystem
 from .app_launcher import AppLauncher
 from .calendar_handler import CalendarHandler
 
-# Try to import personality - optional
 try:
     from .personality import PersonalityEngine
     PERSONALITY_AVAILABLE = True
@@ -20,7 +13,6 @@ except ImportError:
     PERSONALITY_AVAILABLE = False
     PersonalityEngine = None
 
-# Try to import news aggregator
 try:
     from .news_aggregator import NewsAggregator
     NEWS_AVAILABLE = True
@@ -76,24 +68,34 @@ class JarvisAssistant:
         self.max_history = 10
         
         # Learning settings
-        self.auto_learn = True  # Can be toggled
-        self.learn_frequency = 1  # Learn every N messages (1 = every message)
+        self.auto_learn = True
+        self.learn_frequency = 1
         self.message_count = 0
-        self.debug = debug  # Debug mode
+        self.debug = debug
+        
+        # Track last assistant action to avoid repeated offers
+        self.last_action_needed_followup = False
     
     def chat(self, user_input):
         """Process user input and return response"""
         try:
             self.message_count += 1
             
+            # Check if user is declining help/dismissing
+            decline_words = ['no', 'nope', 'nah', 'im good', "i'm good", 'im fine', "i'm fine", 
+                            'im okay', "i'm okay", 'thats all', "that's all", 'nothing else']
+            if any(word in user_input.lower().strip() for word in decline_words):
+                if self.last_action_needed_followup:
+                    # User is saying no to our offer of help
+                    self.last_action_needed_followup = False
+                    return "Understood, sir."
+            
             # Check for app launch commands FIRST
-            print(f"[DEBUG] Input: '{user_input}'")
             if self.app_launcher.can_handle(user_input):
-                print("[DEBUG] App launcher can handle this")
                 app_name = self.app_launcher.extract_app_name(user_input)
-                print(f"[DEBUG] Extracted app: {app_name}")
                 if app_name:
                     success, message = self.app_launcher.open_app(app_name)
+                    self.last_action_needed_followup = False  # Don't follow up after opening app
                     if success:
                         return f"Opening {app_name}, sir."
                     else:
@@ -103,11 +105,9 @@ class JarvisAssistant:
             
             # Check for calendar commands
             if self.calendar.can_handle(user_input):
-                print("[DEBUG] Calendar can handle this")
                 success, message = self.calendar.handle_command(user_input)
+                self.last_action_needed_followup = False  # Don't follow up after calendar action
                 return message
-            
-            print("[DEBUG] Not an app/calendar command, continuing normal processing")
             
             # More specific news triggers
             news_keywords = [
@@ -117,7 +117,7 @@ class JarvisAssistant:
                 'tell me the news', 'today\'s news'
             ]
             
-            # Check for exact news request (not just containing "today")
+            # Check for exact news request
             user_lower = user_input.lower().strip()
             is_news_request = any(keyword in user_lower for keyword in news_keywords)
             
@@ -129,7 +129,7 @@ class JarvisAssistant:
             if is_news_request and self.news:
                 return self._handle_news_request(user_input, headlines_only=True)
             
-            # Evolve personality based on this interaction (if available)
+            # Evolve personality based on this interaction
             if self.personality:
                 self.personality.evolve_personality(user_input)
             
@@ -153,7 +153,7 @@ class JarvisAssistant:
                 'timestamp': datetime.now().isoformat()
             })
             
-            # Auto-learn from this conversation
+            # Auto-learn from this conversation (with better filtering now)
             if self.auto_learn and (self.message_count % self.learn_frequency == 0):
                 if self.debug:
                     print(f"\n[DEBUG] Attempting to learn from: '{user_input[:50]}...'")
@@ -167,12 +167,14 @@ class JarvisAssistant:
                     print(f"[DEBUG] Learned {learned_count} facts")
                 
                 if learned_count > 0:
-                    # Visual feedback - just a simple indicator
                     print("[*] ", end="", flush=True)
             
             # Trim history if too long
             if len(self.conversation_history) > self.max_history * 2:
                 self.conversation_history = self.conversation_history[-self.max_history * 2:]
+            
+            # Check if this response needs followup (avoid asking after simple actions)
+            self.last_action_needed_followup = self._should_offer_followup(response)
             
             return response
             
@@ -182,21 +184,53 @@ class JarvisAssistant:
             traceback.print_exc()
             return "I'm having trouble processing that. Could you try rephrasing?"
     
+    def _should_offer_followup(self, response):
+        """Determine if response warrants offering more help"""
+        # Don't offer followup for:
+        # - Confirmations (already done something)
+        # - Simple answers
+        # - Commands executed
+        
+        lower_response = response.lower()
+        
+        # If it's a confirmation, no followup needed
+        confirmation_words = ['opening', 'created', 'set', 'done', 'understood', 'noted', 'got it']
+        if any(word in lower_response for word in confirmation_words):
+            return False
+        
+        # If it's a very short response (< 20 words), probably don't need followup
+        if len(response.split()) < 20:
+            return False
+        
+        return False  # Default: don't offer followup
+    
     def _handle_general_query(self, user_input):
         """Handle queries without web search"""
         
         # Get relevant context from memory
         context = self.memory.get_context_for_query(user_input)
         
-        # Get personality-adjusted system prompt (if available)
+        # Get personality-adjusted system prompt with STRONGER effects
         if self.personality:
             personality_prompt = self.personality.get_system_prompt_modifier()
         else:
-            personality_prompt = "You are Jarvis, a professional AI assistant. Always address the user as 'sir' or 'ma'am'. The current date is October 30, 2025."
+            # Dynamic date
+            current_date = datetime.now().strftime("%B %d, %Y")
+            personality_prompt = f"You are Jarvis, a professional AI assistant. Always address the user as 'sir' or 'ma'am'. The current date is {current_date}."
         
         # Build enhanced prompt
         if context:
-            enhanced_input = f"{personality_prompt}\n\n{context}\n\n---\n\nUser's current message: {user_input}\n\nRespond naturally, referencing what you know about them when relevant."
+            enhanced_input = f"""{personality_prompt}
+
+{context}
+
+IMPORTANT: The information above is what you know about the user. Use it to personalize your response when relevant.
+
+---
+
+User's current message: {user_input}
+
+Respond naturally and personally, referencing what you know about them when relevant."""
         else:
             enhanced_input = f"{personality_prompt}\n\nUser: {user_input}"
         
@@ -227,8 +261,8 @@ class JarvisAssistant:
         else:
             personality_prompt = "You are JARVIS, an advanced AI assistant."
         
-        # Build search-enhanced prompt
-        current_date = datetime.now().strftime("%B %d, %Y")
+        # Build search-enhanced prompt with CORRECT DATE
+        current_date = "October 31, 2025"
         prompt = f"""{personality_prompt}
 
 TODAY'S DATE: {current_date}
@@ -247,7 +281,6 @@ Instructions: Answer the user's question using the search results above. Be conv
         
         # Limit cache size
         if len(self.search_cache) > 50:
-            # Remove oldest entries
             sorted_cache = sorted(
                 self.search_cache.items(),
                 key=lambda x: x[1][0]
@@ -258,22 +291,18 @@ Instructions: Answer the user's question using the search results above. Be conv
     
     def _handle_news_deepdive(self, user_input):
         """Handle 'more [topic]' command for news details"""
-        # Extract topic identifier (number or keywords)
         more_text = user_input.lower().replace('more', '').strip()
         
         if not more_text:
             return "Please specify which story you'd like more details on. For example: 'more 3' or 'more bitcoin'."
         
-        # Get topic details
         details = self.news.get_topic_details(more_text)
         
         if not details:
             return f"I couldn't find that topic. Please try a different number or keywords from the news list."
         
-        # Format and return details
         formatted = self.news.format_topic_details(details)
         
-        # Get LLM to summarize the detailed articles
         if self.personality:
             personality_prompt = self.personality.get_system_prompt_modifier()
         else:
@@ -304,18 +333,15 @@ Be conversational and informative."""
         return f"\n{formatted}\n\nSUMMARY:\n{llm_summary}"
     
     def _handle_news_request(self, user_input, headlines_only=True):
-        """Handle news/daily summary requests - headlines only by default"""
+        """Handle news/daily summary requests"""
         print("\n", end="", flush=True)
         
-        # Fetch news
         summary = self.news.get_daily_summary()
         
         if headlines_only:
-            # Just show the headlines list
             formatted = self.news.format_summary(summary, show_numbers=True)
             print(formatted)
             
-            # Simple spoken response
             total_stories = sum(len(summary.get(cat, [])) for cat in ['general', 'tech', 'business', 'science'])
             
             if self.personality:
@@ -335,7 +361,6 @@ Keep it conversational and brief."""
             
             return spoken_response
         
-        # Full detailed summary (only if specifically requested)
         else:
             formatted = self.news.format_summary(summary, show_numbers=True)
             print(formatted)
@@ -385,14 +410,12 @@ Create a comprehensive daily briefing organized by category. For each category t
         """Save everything before exiting"""
         print("\nSaving memories...")
         
-        # Export training data automatically
         try:
             export_path = self.export_for_finetuning()
             print(f"Training data exported: {export_path}")
         except Exception as e:
             print(f"Export failed: {e}")
         
-        # Show stats
         stats = self.get_memory_stats()
         print(f"\nSession Summary:")
         print(f"   Total facts remembered: {stats['total_facts']}")

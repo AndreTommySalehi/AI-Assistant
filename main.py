@@ -1,8 +1,3 @@
-"""
-Jarvis AI Assistant - Main entry point with hybrid voice mode
-Smart voice selection: Fast for quick responses, quality for important ones
-"""
-
 import warnings
 import sys
 import os

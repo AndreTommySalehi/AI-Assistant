@@ -1,7 +1,3 @@
-"""
-Enhanced LLM with GPT-OSS server, Ollama, and A/B testing
-"""
-
 import ollama
 from . import config
 import re

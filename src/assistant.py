@@ -7,6 +7,14 @@ from .app_launcher import AppLauncher
 from .calendar_handler import CalendarHandler
 
 try:
+    from .reflection_engine import ReflectionEngine, MultiAgentDebate
+    REFLECTION_AVAILABLE = True
+except ImportError:
+    REFLECTION_AVAILABLE = False
+    ReflectionEngine = None
+    MultiAgentDebate = None
+
+try:
     from .personality import PersonalityEngine
     PERSONALITY_AVAILABLE = True
 except ImportError:
@@ -59,6 +67,15 @@ class JarvisAssistant:
             self.news = NewsAggregator()
         else:
             self.news = None
+        
+        # Initialize reflection engine (if available)
+        if REFLECTION_AVAILABLE:
+            self.reflection = ReflectionEngine(self.llm)
+            self.debate = MultiAgentDebate(self.llm)
+            print("✓ Self-reflection enabled")
+        else:
+            self.reflection = None
+            self.debate = None
         
         # Search cache (simple dict for now)
         self.search_cache = {}
@@ -129,6 +146,40 @@ class JarvisAssistant:
                 else:
                     return f"Today is {current_date}, sir."
             
+            # Check for reflection/debate commands
+            if self.reflection:
+                if user_input.lower().startswith('debate '):
+                    question = user_input[7:].strip()
+                    if question:
+                        answer, debate_history = self.debate.debate(question, rounds=2)
+                        return f"\n[Multi-Agent Debate Result]\n\n{answer}"
+                    else:
+                        return "Please provide a question to debate. Example: 'debate should I learn Python or JavaScript?'"
+                
+                if user_input.lower().startswith('think '):
+                    question = user_input[6:].strip()
+                    if question:
+                        answer = self.reflection.chain_of_thought(
+                            question,
+                            context=self.memory.get_context_for_query(question)
+                        )
+                        return f"\n[Chain-of-Thought Reasoning]\n\n{answer}"
+                    else:
+                        return "Please provide a question to think through. Example: 'think how does photosynthesis work?'"
+                
+                if user_input.lower() == 'reflection stats':
+                    stats = self.reflection.get_stats()
+                    return f"""Reflection Statistics:
+   Total reflections: {stats['total_reflections']}
+   Improvements made: {stats['improvements_made']}
+   Improvement rate: {stats['improvement_rate']:.1%}
+   Status: {'Enabled' if stats['enabled'] else 'Disabled'}"""
+                
+                if user_input.lower() in ['reflection on', 'reflection off']:
+                    enabled = 'on' in user_input.lower()
+                    self.reflection.toggle_reflection(enabled)
+                    return f"Self-reflection {'enabled' if enabled else 'disabled'}, sir."
+            
             # More specific news triggers
             news_keywords = [
                 'news', 'daily recap', 'daily summary', 'daily briefing',
@@ -165,6 +216,23 @@ class JarvisAssistant:
                 response = self._handle_search_query(user_input)
             else:
                 response = self._handle_general_query(user_input)
+            
+            # SELF-REFLECTION: Check if response needs improvement
+            if self.reflection and self.reflection.should_reflect(user_input, response):
+                if self.debug:
+                    print("\n[Self-Reflection Triggered]")
+                
+                improved_response, was_improved, notes = self.reflection.reflect_and_improve(
+                    user_input, 
+                    response,
+                    context=self.memory.get_context_for_query(user_input)
+                )
+                
+                if was_improved:
+                    if self.debug:
+                        print(f"[Response improved - Accuracy: {notes['accuracy']:.2f}, Completeness: {notes['completeness']:.2f}]")
+                    response = improved_response
+                    print("[✓] ", end="", flush=True)  # Visual indicator
             
             # Add assistant response to history
             self.conversation_history.append({

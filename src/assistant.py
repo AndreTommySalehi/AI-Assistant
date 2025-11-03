@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime as dt_module
 import re
 from .llm import LLMHandler
 from .search import WebSearch
@@ -109,6 +109,26 @@ class JarvisAssistant:
                 self.last_action_needed_followup = False  # Don't follow up after calendar action
                 return message
             
+            # Check for simple date/time questions (don't search for these)
+            date_time_patterns = [
+                r'\b(what|whats|what\'s)\s+(is\s+)?(the\s+)?(date|time|day)\b',
+                r'\b(current|today\'?s?)\s+(date|time|day)\b',
+                r'\bwhat\s+day\s+is\s+it\b',
+            ]
+            
+            if any(re.search(pattern, user_input.lower()) for pattern in date_time_patterns):
+                current_date = dt_module.now().strftime("%B %d, %Y")
+                current_time = dt_module.now().strftime("%I:%M %p")
+                current_day = dt_module.now().strftime("%A")
+                
+                # Determine what they're asking for
+                if 'time' in user_input.lower():
+                    return f"It's {current_time}, sir."
+                elif 'day' in user_input.lower():
+                    return f"Today is {current_day}, {current_date}, sir."
+                else:
+                    return f"Today is {current_date}, sir."
+            
             # More specific news triggers
             news_keywords = [
                 'news', 'daily recap', 'daily summary', 'daily briefing',
@@ -137,7 +157,7 @@ class JarvisAssistant:
             self.conversation_history.append({
                 'role': 'user',
                 'content': user_input,
-                'timestamp': datetime.now().isoformat()
+                'timestamp': dt_module.now().isoformat()
             })
             
             # Generate response
@@ -150,7 +170,7 @@ class JarvisAssistant:
             self.conversation_history.append({
                 'role': 'assistant',
                 'content': response,
-                'timestamp': datetime.now().isoformat()
+                'timestamp': dt_module.now().isoformat()
             })
             
             # Auto-learn from this conversation (with better filtering now)
@@ -214,9 +234,9 @@ class JarvisAssistant:
         if self.personality:
             personality_prompt = self.personality.get_system_prompt_modifier()
         else:
-            # Dynamic date
-            current_date = datetime.now().strftime("%B %d, %Y")
-            personality_prompt = f"You are Jarvis, a professional AI assistant. Always address the user as 'sir' or 'ma'am'. The current date is {current_date}."
+            # Dynamic date - get fresh each time
+            current_date = dt_module.now().strftime("%B %d, %Y")
+            personality_prompt = f"You are Jarvis, a professional AI assistant. Always address the user as 'sir'. The current date is {current_date}."
         
         # Build enhanced prompt
         if context:
@@ -244,7 +264,7 @@ Respond naturally and personally, referencing what you know about them when rele
         if cache_key in self.search_cache:
             cached_time, cached_result = self.search_cache[cache_key]
             # Cache valid for 1 hour
-            if (datetime.now() - cached_time).seconds < 3600:
+            if (dt_module.now() - cached_time).seconds < 3600:
                 print("(cached) ", end="", flush=True)
                 return cached_result
         
@@ -261,8 +281,8 @@ Respond naturally and personally, referencing what you know about them when rele
         else:
             personality_prompt = "You are JARVIS, an advanced AI assistant."
         
-        # Build search-enhanced prompt with CORRECT DATE
-        current_date = "October 31, 2025"
+        # Build search-enhanced prompt with dynamic date
+        current_date = dt_module.now().strftime("%B %d, %Y")
         prompt = f"""{personality_prompt}
 
 TODAY'S DATE: {current_date}
@@ -277,7 +297,7 @@ Instructions: Answer the user's question using the search results above. Be conv
         response = self.llm.generate(prompt, use_search_context=True)
         
         # Cache the result
-        self.search_cache[cache_key] = (datetime.now(), response)
+        self.search_cache[cache_key] = (dt_module.now(), response)
         
         # Limit cache size
         if len(self.search_cache) > 50:
@@ -398,7 +418,7 @@ Create a comprehensive daily briefing organized by category. For each category t
     def export_for_finetuning(self, filepath=None):
         """Export training data for future fine-tuning"""
         if filepath is None:
-            filepath = f"./jarvis_data/training_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            filepath = f"./jarvis_data/training_export_{dt_module.now().strftime('%Y%m%d_%H%M%S')}.json"
         
         return self.memory.export_training_data(filepath)
     
